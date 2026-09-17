@@ -41,7 +41,7 @@ function FRAME_META:CreateFontString()
     return fs
 end
 FRAME_META.SetFrameStrata  = function() end
-FRAME_META.EnableMouse     = function() end
+FRAME_META.EnableMouse     = function(self, on) self.__mouse = on and true or false end
 FRAME_META.SetSize         = function(self, w, h) self.__w, self.__h = w, h end
 FRAME_META.SetWidth        = function(self, w) self.__w = w end
 FRAME_META.GetWidth        = function(self) return self.__w end
@@ -61,8 +61,15 @@ FRAME_META.ClearAllPoints  = function() end
 FRAME_META.SetPoint        = function() end
 FRAME_META.SetScript       = function(self, k, fn) self.__scripts[k] = fn end
 FRAME_META.GetScript       = function(self, k) return self.__scripts[k] end
-FRAME_META.RegisterEvent   = function() end
-FRAME_META.RegisterUnitEvent = function() end
+-- 事件登记也记一笔：用来断言"非本职业时一个事件都不注册"
+FRAME_META.RegisterEvent     = function(self, e)
+    self.__events = self.__events or {}
+    self.__events[e] = true
+end
+FRAME_META.RegisterUnitEvent = function(self, e)
+    self.__events = self.__events or {}
+    self.__events[e] = true
+end
 
 -- GetChildren 在 WoW 里返回多个值，不是表 —— 桩必须照实返回
 function FRAME_META:GetChildren()
@@ -98,9 +105,18 @@ function ENV.install(lang)
     ENV.lines = {}
 
     out.UIParent     = newFrame(nil)
-    -- CreateFrame(frameType, name, parent, template) —— parent 必须传下去，
-    -- 否则蒙版帧挂不到图标上，测出来的东西根本不对
-    out.CreateFrame  = function(_, _, parent) return newFrame(parent) end
+    -- CreateFrame(frameType, name, parent, template) —— 第 3 个参数是 parent，必须真的
+    -- 传下去，否则子帧挂不上、测出来的东西全是假的。frameType/name 记下来供测试观察。
+    -- 同时登记进 out.__frames（按 env 分组）：ENV.frames 是全局的，跨 env 找帧会拿到
+    -- 上一个 env 的同名帧 —— "重登之后设置有没有读回来"这类用例会因此测了个寂寞。
+    out.__frames     = {}
+    out.CreateFrame  = function(ftype, name, parent)
+        local f = newFrame(parent)
+        f.__ftype, f.__name = ftype, name
+        f.__env = out
+        out.__frames[#out.__frames + 1] = f
+        return f
+    end
     out.GetLocale    = function() return lang or 'zhCN' end
     out.GetTime      = function() return NOW end
     out.GetBuildInfo = function() return 1, 'x', 'y', 120100 end
@@ -187,6 +203,139 @@ function ENV.makeViewer(cooldownIDs)
         return t
     end
     return viewer
+end
+
+------------------------------------------------------------------
+-- 追加：BoilingPoint.lua 用到的通用接口
+-- 全部是"加方法"，不动已有语义 —— BoneShield 的用例不受影响。
+------------------------------------------------------------------
+FRAME_META.SetClampedToScreen   = function() end
+-- 拖动面：记下"能不能拖、拖起来没有、拖到哪"。GetCenter 支持每个帧单独摆位置
+-- （f.__center = {x,y}），否则拖动的落点算不出来 —— 全是 0,0 就测不出偏移对不对。
+FRAME_META.SetMovable           = function(self) self.__movable = true end
+FRAME_META.RegisterForDrag      = function(self, btn) self.__dragBtn = btn end
+FRAME_META.StartMoving          = function(self) self.__moving = true end
+FRAME_META.StopMovingOrSizing   = function(self)
+    self.__moving, self.__stoppedMoving = false, true
+end
+FRAME_META.GetCenter            = function(self)
+    local c = self.__center
+    if c then return c[1], c[2] end
+    return 0, 0
+end
+FRAME_META.SetShown             = function(self, on) self.__shown = on and true or false end
+FRAME_META.SetStatusBarTexture  = function() end
+FRAME_META.SetStatusBarColor    = function(self, r, g, b, a) self.__barColor = { r, g, b, a } end
+FRAME_META.SetValue             = function(self, v) self.__value = v end
+FRAME_META.GetValue             = function(self) return self.__value or 0 end
+FRAME_META.SetMinMaxValues      = function(self, a, b) self.__min, self.__max = a, b end
+FRAME_META.SetOrientation       = function() end
+FRAME_META.SetDrawEdge          = function() end
+FRAME_META.SetDrawBling         = function() end
+FRAME_META.SetReverse           = function() end
+FRAME_META.SetHideCountdownNumbers = function() end
+FRAME_META.SetCooldown          = function(self, s, d) self.__cd = { s, d } end
+FRAME_META.Clear                = function(self) self.__cd = nil end
+FRAME_META.CreateMaskTexture    = function() return setmetatable({}, TEX_META) end
+
+TEX_META.SetTexCoord    = function() end
+TEX_META.SetVertexColor = function(self, r, g, b, a) self.vr, self.vg, self.vb, self.va = r, g, b, a end
+TEX_META.SetSize        = function(self, w, h) self.__w, self.__h = w, h end
+TEX_META.ClearAllPoints = function() end
+TEX_META.Show           = function(self) self.__shown = true end
+TEX_META.Hide           = function(self) self.__shown = false end
+TEX_META.IsShown        = function(self) return self.__shown end
+TEX_META.AddMaskTexture = function(self, m) self.__mask = m end
+
+-- 动画链：像素跑马灯辉光靠 C 侧 Translation 动画移动虚线，桩里只需要"会不会播"
+local AG_META, ANIM_META = {}, {}
+AG_META.__index, ANIM_META.__index = AG_META, ANIM_META
+function AG_META:SetLooping() end
+function AG_META:Stop() self.__playing = false end
+function AG_META:Play() self.__playing = true end
+function AG_META:IsPlaying() return self.__playing == true end
+function AG_META:CreateAnimation(kind)
+    local a = setmetatable({ __kind = kind }, ANIM_META)
+    self.__anims[#self.__anims + 1] = a
+    return a
+end
+ANIM_META.SetSmoothing  = function() end
+ANIM_META.SetOffset     = function() end
+ANIM_META.SetDuration   = function() end
+ANIM_META.SetFromAlpha  = function() end
+ANIM_META.SetToAlpha    = function() end
+
+TEX_META.CreateAnimationGroup = function(self)
+    local ag = setmetatable({ __playing = false, __anims = {}, __owner = self }, AG_META)
+    self.__ag = ag
+    return ag
+end
+
+FONT_META.SetShown = function(self, on) self.__shown = on and true or false end
+
+------------------------------------------------------------------
+-- BoilingPoint.lua 需要的额外全局面
+------------------------------------------------------------------
+function ENV.installBP(env)
+    env.STANDARD_TEXT_FONT = 'Fonts\\FRIZQT__.TTF'
+    env.Enum = { StatusBarInterpolation = { ExponentialEaseOut = 1, Immediate = 2 } }
+    env.GetCVar     = function() return '1' end
+    env.GetSpellInfo = function(id) return 'spell' .. tostring(id) end
+
+    -- 技能触发高亮：测试直接控制"游戏此刻点亮了哪个 ID"
+    env.__overlay = {}
+    env.C_SpellActivationOverlay = {
+        IsSpellOverlayed = function(id) return env.__overlay[id] == true end,
+    }
+    function env.overlay(id, on) env.__overlay[id] = on and true or nil end
+
+    -- base/override 映射：override 只覆盖有登记的那些
+    env.__base, env.__override = { [50842] = 50842 }, {}
+    env.C_Spell = env.C_Spell or {}
+    env.C_Spell.GetBaseSpell     = function(id) return env.__base[id] end
+    env.C_Spell.GetOverrideSpell = function(id) return env.__override[id] or id end
+    env.C_Spell.GetSpellName     = function(id) return 'spell' .. tostring(id) end
+
+    -- 定时器：NewTicker + Cancel。runTickers 按固定 0.1 秒步进推进受控时钟，
+    -- 时钟必须无条件前进 —— 一个 ticker 都没有的时候（模块停表了）时间照样在走，
+    -- 否则"停表之后又过了几秒"这种用例根本测不出来。
+    env.__tickers = {}
+    env.C_Timer = env.C_Timer or {}
+    env.C_Timer.NewTicker = function(interval, fn)
+        local t = { interval = interval, fn = fn }
+        env.__tickers[#env.__tickers + 1] = t
+        t.Cancel = function() t.__cancelled = true end
+        return t
+    end
+    function env.runTickers(n)
+        for _ = 1, (n or 1) do
+            ENV.setNow(ENV.now() + 0.1)
+            local list = env.__tickers
+            for i = 1, #list do
+                local t = list[i]
+                if t and not t.__cancelled then
+                    t.__next = t.__next or (ENV.now() + t.interval)
+                    if ENV.now() + 1e-9 >= t.__next then
+                        t.__next = t.__next + t.interval
+                        t.fn()
+                    end
+                end
+            end
+        end
+    end
+
+    -- 以名字/类型找帧，测试里用来观察模块自己的界面。
+    -- **只认本 env 建的帧** —— ENV.frames 是全局的，跨 env 查会拿到上一个 env 的同名帧，
+    -- "重登之后设置读回来了吗"、"非 DK 有没有偷偷建帧"这类断言就全成了假通过。
+    env.__frames = env.__frames or {}
+    local function find(key, want)
+        for i = 1, #env.__frames do
+            if env.__frames[i][key] == want then return env.__frames[i] end
+        end
+    end
+    function env.findFrame(name) return find('__name', name) end
+    function env.findByType(ftype) return find('__ftype', ftype) end
+    return env
 end
 
 return ENV

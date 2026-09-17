@@ -1,0 +1,12 @@
+# 一律使用 LF 换行，避免 Windows / CI 之间的无谓 diff
+#
+# 注意：现有文件历史上是 CRLF，加上这条之后**下次 git add 会把它们整篇规范化成 LF**
+# —— 那一次提交会出现"整文件重写"式的 diff，是一次性的，属预期。
+* text=auto eol=lf
+
+# 二进制资源不做换行转换
+*.zip binary
+*.tga binary
+*.ttf binary
+*.ogg binary
+*.mp3 binary

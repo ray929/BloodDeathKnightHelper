@@ -31,12 +31,22 @@ local function clearLines()
     local t = env.__lines
     for i = #t, 1, -1 do t[i] = nil end
 end
+-- 状态/诊断走 /bdk debug（/bdk 自己现在只打帮助）
 local function cmd(m)
     env.SlashCmdList.BLOODDEATHKNIGHT(m or '')
     return drain()
 end
 local function sounds() return #env.__sounds end
 local function resetSounds() env.__sounds = {} end
+-- 语音分两种：'voice-cn.mp3' = 提前预警（倒计时到点）、'voice-cn-1.mp3' = 已经没了
+-- （骨盾掉了 / 埋骨之所掉了）。文件名的包含关系是"前缀"关系但不会互相误命中：
+-- 'voice-cn.mp3' 不是 'voice-cn-1.mp3' 的子串。
+local function soundUsed(sub)
+    for i = 1, #env.__sounds do
+        if env.__sounds[i]:find(sub, 1, true) then return true end
+    end
+    return false
+end
 
 local function tick(n)
     for _ = 1, (n or 1) do
@@ -50,7 +60,7 @@ end
 ------------------------------------------------------------------ 搭建 CDM
 env.addCooldown(1, { spellID = 195181 })   -- 骨盾
 -- 埋骨之所：实测形态是**一个** cooldownInfo 同时带 spellID 与 linkedSpellID
--- （游戏里 /bdk dump 打出来是 spell=219786 linked=219788，同一个 cdID）
+-- （游戏里 /bdk debug 打出来是 spell=219786 linked=219788，同一个 cdID）
 env.addCooldown(2, { spellID = 219786, linkedSpellID = 219788 })
 
 local viewer = ENV.makeViewer({ 1, 2 })
@@ -62,8 +72,13 @@ local ossItem = viewer.__items[2]
 bsItem.IsActive, ossItem.IsActive = false, false
 
 ------------------------------------------------------------------ 加载插件
+-- 按 toc 的顺序：Commands.lua（命令表）先加载，模块往它里面登记子命令。
+local ROOT = ADDON:gsub('[^/\\]*$', '')
+local cmds = assert(loadfile(ROOT .. 'Commands.lua', 't', env))
+cmds('BloodDeathKnightHelper')
+
 local chunk = assert(loadfile(ADDON, 't', env))
-chunk('BloodDeathKnight')
+chunk('BloodDeathKnightHelper')
 
 local driver, evt
 for i = 1, #ENV.frames do
@@ -80,14 +95,14 @@ env.__alertText = ENV.fonts[1]
 assert(env.__alertText, 'alert fontstring not found')
 
 env.SlashCmdList.BLOODDEATHKNIGHT('')                     -- 加载前不许崩
-evt.__scripts.OnEvent(evt, 'ADDON_LOADED', 'BloodDeathKnight')
+evt.__scripts.OnEvent(evt, 'ADDON_LOADED', 'BloodDeathKnightHelper')
 env.__inCombat = true
 ENV.setNow(10)
 evt.__scripts.OnEvent(evt, 'PLAYER_ENTERING_WORLD')
 drain()
 
 io.write('\n== T0 配置识别 ==\n')
-local s = cmd()
+local s = cmd('debug')
 check('骨盾条目已监控', s:find('骨盾(CDM): 已监控 x1', 1, true) ~= nil, s)
 check('埋骨之所条目已监控', s:find('埋骨之所(CDM): 已监控 x1', 1, true) ~= nil, s)
 check('未出现"缺失"', s:find('缺失', 1, true) == nil, s)
@@ -97,7 +112,7 @@ check('状态里能看到蒙版开关', s:find('图标蒙版: 开', 1, true) ~= 
 io.write('\n== T1 骨盾亮起 → WARN_AFTER(24s) 倒计时到点 ==\n')
 bsItem.IsActive = true
 tick(2)
-check('骨盾在场，倒计时启动', cmd():find('timer: 2', 1, true) ~= nil)
+check('骨盾在场，倒计时启动', cmd('debug'):find('timer: 2', 1, true) ~= nil)
 check('提醒前不挂蒙版', #bsItem.__kids == 0)
 
 resetSounds()
@@ -105,6 +120,9 @@ tick(45)                                   -- 累计 23.5s < WARN_AFTER(24s)：�
 check('到点前不提醒', sounds() == 0, sounds())
 tick(4)                                    -- 累计 25.5s：越过 WARN_AFTER
 check('到点响了语音', sounds() == 1, sounds())
+check('到点用的是「提前预警」语音 voice-cn.mp3',
+    soundUsed('voice-cn.mp3') and not soundUsed('voice-cn-1.mp3'),
+    table.concat(env.__sounds, ' '))
 check('到点显示了提醒文字', env.__alertText:GetText() == '补骨盾', env.__alertText:GetText())
 
 local ov
@@ -132,7 +150,7 @@ resetSounds()
 -- 受限战斗的典型样子：isActive 变机密，但图标照画（buff 还在）
 bsItem.IsActive = ENV.SECRET
 tick(4)                                    -- 2 秒
-check('isActive 机密但图标在画 → 仍读作在场', cmd():find('timer: idle', 1, true) == nil)
+check('isActive 机密但图标在画 → 仍读作在场', cmd('debug'):find('timer: idle', 1, true) == nil)
 check('未误报补盾', sounds() == 0, sounds())
 check('蒙版仍在闪', ov and ov.__scripts.OnUpdate ~= nil)
 bsItem.IsActive = true
@@ -143,7 +161,7 @@ resetSounds()
 bsItem.IsActive = false
 tick(1)                                    -- 0.5s < DOWN_GRACE
 check('掉一拍未触发提醒', sounds() == 0, sounds())
-check('倒计时未被打断', cmd():find('timer: idle', 1, true) == nil)
+check('倒计时未被打断', cmd('debug'):find('timer: idle', 1, true) == nil)
 bsItem.IsActive = true                     -- 立刻回来
 tick(2)
 check('瞬态回落不触发提醒', sounds() == 0, sounds())
@@ -154,11 +172,11 @@ local keepID = bsItem.__cooldownID
 bsItem.__cooldownID = 999                  -- 池化帧被换绑给别的法术
 tick(2)                                    -- 1 秒扫不到骨盾条目
 check('条目不在了也不误报补盾', sounds() == 0, sounds())
-check('倒计时没被清掉（空列表 = 未知，不是掉了）', cmd():find('timer: idle', 1, true) == nil)
+check('倒计时没被清掉（空列表 = 未知，不是掉了）', cmd('debug'):find('timer: idle', 1, true) == nil)
 check('换绑帧上的蒙版已撤（不留在别人图标上）', ov and ov.__alpha == 0, ov and ov.__alpha)
 bsItem.__cooldownID = keepID               -- 换回来
 tick(3)
-check('恢复后倒计时仍在', cmd():find('timer: idle', 1, true) == nil)
+check('恢复后倒计时仍在', cmd('debug'):find('timer: idle', 1, true) == nil)
 check('恢复后蒙版重新挂上', ov and ov.__scripts.OnUpdate ~= nil)
 
 io.write('\n== T9b 瞬态消失不弹"未配置" ==\n')
@@ -178,7 +196,7 @@ ossItem.IsActive = ENV.SECRET             -- 读不到
 ossItem:Hide()                            -- 也从没画出来过
 ossItem:SetAlpha(0)
 tick(3)
-local dump = cmd('dump')
+local dump = cmd('debug')
 check('诱饵帧被标为 unreadable / proven=no',
     dump:find('isActive=unreadable proven=no', 1, true) ~= nil, dump)
 check('诱饵帧不产生提醒', sounds() == 0, sounds())
@@ -189,7 +207,7 @@ ossItem:Show()
 ossItem:SetAlpha(1)
 tick(1)
 evt.__scripts.OnEvent(evt, 'UNIT_SPELLCAST_SUCCEEDED', 'player', nil, 195182)
-local st = cmd()
+local st = cmd('debug')
 check('施放后倒计时重置为 24s', st:find('timer: 24', 1, true) ~= nil, st)
 check('施放后蒙版清除（alpha 归零）', ov and ov.__alpha == 0, ov and ov.__alpha)
 check('施放后蒙版停止脉动', ov and ov.__scripts.OnUpdate == nil)
@@ -200,7 +218,10 @@ resetSounds()
 bsItem.IsActive = false
 tick(5)                                    -- 2.5s > DOWN_GRACE
 check('连续消失后触发一次提醒', sounds() == 1, sounds())
-check('倒计时已清空', cmd():find('timer: idle', 1, true) ~= nil)
+check('骨盾掉了用的是「已经没了」语音 voice-cn-1.mp3',
+    soundUsed('voice-cn-1.mp3') and not soundUsed('voice-cn.mp3'),
+    table.concat(env.__sounds, ' '))
+check('倒计时已清空', cmd('debug'):find('timer: idle', 1, true) ~= nil)
 
 io.write('\n== T7 非战斗消失 → 静默 ==\n')
 resetSounds()
@@ -216,17 +237,17 @@ io.write('\n== T8 非鲜血专精待机 ==\n')
 env.__spec = 2
 clearLines()
 tick(2)
-check('非鲜血专精无倒计时且无蒙版', cmd():find('timer: idle', 1, true) ~= nil)
+check('非鲜血专精无倒计时且无蒙版', cmd('debug'):find('timer: idle', 1, true) ~= nil)
 check('非鲜血专精时不打蒙版', ov and ov.__alpha == 0, ov and ov.__alpha)
 
 io.write('\n== T10 一个条目携带两个 ID（埋骨之所的实测形态） ==\n')
--- 回归：/bdk dump 曾经"一个 ID 一行"，于是一条 spell+linked 的条目看起来像两条独立
+-- 回归：/bdk debug 曾经"一个 ID 一行"，于是一条 spell+linked 的条目看起来像两条独立
 -- 条目，会被误读成"得在两个 ID 之间挑对的那个"。诊断必须打成一行。
 env.__spec = 1
 env.__inCombat = false
 clearLines()
 tick(1)
-local dd = cmd('dump')
+local dd = cmd('debug')
 local function countOf(s, pat)
     local n, pos = 0, 1
     while true do
@@ -302,6 +323,9 @@ tick(12)                        -- 再撑 6 秒（骨盾真正的到期时刻）
 bsItem.IsActive = false
 tick(4)                         -- 2s：去抖成立
 check('骨盾随后真的消失，再报一次（不被去重吞掉）', sounds() == 2, sounds())
+check('后一声是「已经没了」那条语音',
+    env.__sounds[2] ~= nil and env.__sounds[2]:find('voice-cn-1.mp3', 1, true) ~= nil,
+    tostring(env.__sounds[2]))
 
 -- (d) 埋骨之所先掉、骨盾随后也掉：先后两条判据，打的是同一句话
 armWindow()
@@ -309,9 +333,87 @@ tick(1)
 ossItem.IsActive = false
 tick(3)                         -- 1.5s：埋骨之所去抖成立，响一次
 check('埋骨之所掉了报一次', sounds() == 1, sounds())
+check('埋骨之所掉了用「已经没了」语音',
+    soundUsed('voice-cn-1.mp3'), table.concat(env.__sounds, ' '))
 bsItem.IsActive = false
 tick(3)                         -- 1.5s：骨盾也掉了
 check('骨盾随后也掉，同一句话不重复响', sounds() == 1, sounds())
+
+io.write('\n== T12 命令表：/bdk 帮助排版 ==\n')
+local help = cmd('')
+check('空命令 = 帮助', help:find('/bdk bs test', 1, true) ~= nil, help)
+check('帮助里命令与说明是两种颜色',
+    help:find('|cffffd100/bdk', 1, true) ~= nil and help:find('|cff9d9d9d', 1, true) ~= nil, help)
+check('帮助里没有 debug（隐藏命令）', help:find('debug', 1, true) == nil, help)
+check('帮助里列出骨盾这两条',
+    help:find('/bdk bs test', 1, true) ~= nil and help:find('/bdk bs sound', 1, true) ~= nil, help)
+check('没加载的模块不往帮助里塞命令（血沸条目此刻不该出现）',
+    help:find('/bdk bp', 1, true) == nil, help)
+check('帮助第一行就是 /bdk 自己', help:find('/bdk ', 1, true) ~= nil)
+
+-- 说明列对齐：命令行一律按"显示宽度"补空格（汉字算两列），所以 ASCII 各行落在
+-- 同一个字节位置。汉字那一条的检验在血沸那套里（那边有 `/bdk bp width 数字`）。
+local function descCol(text, label)
+    for line in text:gmatch('[^\n]+') do
+        if line:find(label, 1, true) then return line:find('|cff9d9d9d', 1, true) end
+    end
+end
+local colSelf = descCol(help, '/bdk ')
+local colBs   = descCol(help, '/bdk bs test')
+local colSnd  = descCol(help, '/bdk bs sound')
+check('ASCII 各行的说明列对齐', colSelf ~= nil and colSelf == colBs and colSelf == colSnd,
+    tostring(colSelf) .. '/' .. tostring(colBs) .. '/' .. tostring(colSnd))
+
+io.write('\n== T13 删掉的旧命令不再存在 ==\n')
+for _, old in ipairs({ 'test', 'dump', 'sound on', 'sound off', 'text on', 'text off',
+                       'flash on', 'flash off', 'lang cn', 'lang auto', 'enable off', 'enable on' }) do
+    local out = cmd(old)
+    check('认不出旧命令 ' .. old, out:find('没有这条命令', 1, true) ~= nil, out)
+end
+check('认不出的命令顺手打帮助', cmd('nonsense'):find('/bdk bs test', 1, true) ~= nil)
+check('斜杠命令只有 /bdk（旧别名 /bsr 已移除）',
+    env.SLASH_BLOODDEATHKNIGHT1 == '/bdk' and env.SLASH_BLOODDEATHKNIGHT2 == nil,
+    tostring(env.SLASH_BLOODDEATHKNIGHT1) .. '/' .. tostring(env.SLASH_BLOODDEATHKNIGHT2))
+
+io.write('\n== T14 骨盾的两条命令：bs test / bs sound ==\n')
+env.__spec = 1
+resetSounds()
+local t = cmd('bs test')
+check('bs test 认领并打出自检行', t:find('test: shown=', 1, true) ~= nil, t)
+check('bs test 会出声', sounds() == 1, sounds())
+check('bs test 打的是「提前预警」那条语音', t:find('voice-cn.mp3', 1, true) ~= nil
+    and soundUsed('voice-cn.mp3'), t)
+check('bs test 顺手提示怎么试听另一条', t:find('bs test 2', 1, true) ~= nil, t)
+
+resetSounds()
+local t2v = cmd('bs test 2')
+check('bs test 2 试听「已经没了」那条语音',
+    t2v:find('voice-cn-1.mp3', 1, true) ~= nil and soundUsed('voice-cn-1.mp3')
+        and not soundUsed('voice-cn.mp3'), t2v .. ' | ' .. table.concat(env.__sounds, ' '))
+check('试听也顺手提示另一条', t2v:find('bs test', 1, true) ~= nil, t2v)
+
+resetSounds()
+cmd('bs sound off')
+check('bs sound 关掉语音', env.BloodDeathKnightDB.sound == false,
+    tostring(env.BloodDeathKnightDB.sound))
+local t2 = cmd('bs test')
+check('语音关了自检照旧、但不出声',
+    t2:find('test: shown=', 1, true) ~= nil and sounds() == 0, sounds())
+
+resetSounds()
+cmd('bs sound')
+check('bs sound 不带参数 = 切回开', env.BloodDeathKnightDB.sound == true,
+    tostring(env.BloodDeathKnightDB.sound))
+cmd('bs test')
+check('切回开后又能出声', sounds() == 1, sounds())
+check('bs sound 的非法参数只给用法', cmd('bs sound x'):find('用法', 1, true) ~= nil)
+
+-- 非鲜血专精：待机，别给一个假的"预览"
+env.__spec = 2
+local idle = cmd('bs test')
+check('非鲜血专精 bs test 只说待机',
+    idle:find('非鲜血死亡骑士', 1, true) ~= nil and idle:find('test: shown=', 1, true) == nil, idle)
+env.__spec = 1
 
 io.write(('\n结果：%d 通过 / %d 失败\n'):format(passes, fails))
 os.exit(fails == 0 and 0 or 1)

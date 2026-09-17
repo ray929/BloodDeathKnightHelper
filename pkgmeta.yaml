@@ -1,7 +1,13 @@
-package-as: BloodDeathKnight
+package-as: BloodDeathKnightHelper
 enable-nolib-creation: no
 
+# 打包时排除开发资料：发布出去的 zip 只含 toc + 三个 lua + Sounds/
 ignore:
+  - .gitignore
+  - .gitattributes
+  - .github
+  - .workbuddy
+  - AGENTS.md
+  - README.md
   - docs
   - tests
-  - README.md

@@ -74,14 +74,12 @@ local LOCALE = GetLocale()
 local L = {}
 
 local function ApplyLang()
-    local lang = DB and DB.lang or 'auto'
-    local zh
-    if lang == 'cn' then zh = true
-    elseif lang == 'en' then zh = false
-    else zh = (LOCALE:sub(1, 2) == 'zh') end
+    -- 强制跟随客户端语种：语言不再是设置项（没有 /bdk lang 了）。中文客户端就是
+    -- 中文，别的就是英文 —— 一个能跟客户端说的不一样的语言开关，只会让人怀疑
+    -- 自己的客户端出了什么问题。
+    local zh = (LOCALE:sub(1, 2) == 'zh')
 
     if zh then
-        L.soundLang = 'cn'
         L.alertText = '补骨盾'
         L.setupText = '请将「骨盾」和「埋骨之所」拖入冷却管理器 (CDM)'
         L.tag = '|cff71d5ff[鲜血死亡骑士]|r'
@@ -90,17 +88,20 @@ local function ApplyLang()
         L.sound = '语音'
         L.text = '文字'
         L.flash = '图标蒙版'
-        L.langName = '语言'
-        L.langAuto, L.langCn, L.langEn = '跟随客户端', '中文', '英语'
-        L.help = '/bdk test 预览；/bdk dump 枚举CDM光环；/bdk sound on|off 语音；/bdk text on|off 文字；'
-            .. '/bdk flash on|off 图标蒙版闪烁；/bdk lang auto|cn|en 语言；/bdk enable on|off 总开关'
+        L.usage = '用法：/bdk %s on|off（不带参数 = 切换）'
         L.bloodYes, L.bloodNo = '鲜血死亡骑士', '非鲜血死亡骑士（插件待机）'
         L.cdmBs, L.cdmOss = '骨盾(CDM)', '埋骨之所(CDM)'
         L.cdmFound, L.cdmMiss = '已监控', '缺失'
         L.cdmUnproven = '（从未激活过）'
         L.flashIdle = '未在提醒窗口'
+        -- 语音分两种（听声音就知道是哪条判据在响）：倒计时到点的"提前预警"、已经掉了的"补盾"。
+        L.voiceWarn = 'voice-cn.mp3'
+        L.voiceGone = 'voice-cn-1.mp3'
+        L.reasonWarn, L.reasonGone = '提前预警（倒计时到点）', '已经没了（掉了）'
+        L.lastAlert = '上次提醒'
+        L.testHintWarn = '试试另一条（已经没了）：/bdk bs test 2'
+        L.testHintGone = '试试另一条（提前预警）：/bdk bs test'
     else
-        L.soundLang = 'en'
         L.alertText = 'Bone Shield!'
         L.setupText = 'Drag "Bone Shield" and "Ossuary" into the Cooldown Manager (CDM)'
         L.tag = '|cff71d5ff[BloodDeathKnight]|r'
@@ -109,26 +110,32 @@ local function ApplyLang()
         L.sound = 'voice'
         L.text = 'text'
         L.flash = 'icon mask'
-        L.langName = 'language'
-        L.langAuto, L.langCn, L.langEn = 'auto (client)', 'Chinese', 'English'
-        L.help = '/bdk test preview; /bdk dump list CDM auras; /bdk sound on|off voice; /bdk text on|off text; '
-            .. '/bdk flash on|off icon mask; /bdk lang auto|cn|en language; /bdk enable on|off master toggle'
+        L.usage = 'usage: /bdk %s on|off (bare = toggle)'
         L.bloodYes, L.bloodNo = 'Blood Death Knight', 'not Blood DK (addon idle)'
         L.cdmBs, L.cdmOss = 'Bone Shield (CDM)', 'Ossuary (CDM)'
         L.cdmFound, L.cdmMiss = 'tracked', 'missing'
         L.cdmUnproven = ' (never lit)'
         L.flashIdle = 'no warning window'
+        -- 英文只有一条语音（用户要求），两种触发共用。
+        L.voiceWarn = 'voice-en.mp3'
+        L.voiceGone = 'voice-en.mp3'
+        L.reasonWarn, L.reasonGone = 'early warning (timer)', 'already gone'
+        L.lastAlert = 'last alert'
+        L.testHintWarn = 'try the other one (already gone): /bdk bs test 2'
+        L.testHintGone = 'try the other one (early warning): /bdk bs test'
     end
 end
 
 ---------------------------------------------------------------- 设置
 local DB
 local DEFAULTS = {
+    -- 全是"功能内部状态"，不再是玩家可开关的选项：命令只剩 /bdk bs sound / bs test。
+    -- text / flash 一直开着（红字提醒 + 图标蒙版闪烁），enable 是总闸（为调试保留字段，
+    -- 没有命令改它）。
     enabled = true,
     sound   = true,
     text    = true,
     flash   = true,
-    lang    = 'auto',
 }
 
 ---------------------------------------------------------------- 工具
@@ -492,10 +499,14 @@ local function PositionAlert()
     alertFrame:SetPoint('CENTER', UIParent, 'TOP', 0, -h / 3)
 end
 
-local function PlayVoice()
+-- 语音分两条，听声音就能分出是哪一类判据在响（排查误报时最省事的一招）：
+--   'warn' —— 倒计时到点，提前预警；
+--   'gone' —— 已经没了（骨盾掉了 / 埋骨之所掉了）。
+-- 文件名走 L.voice*（中文两个文件，英文一个）。
+local function PlayVoice(kind)
     if not DB or not DB.sound then return end
-    local path = ('Interface\\AddOns\\%s\\Sounds\\voice-%s.mp3')
-        :format(ADDON_NAME, L.soundLang)
+    local file = (kind == 'gone') and L.voiceGone or L.voiceWarn
+    local path = ('Interface\\AddOns\\%s\\Sounds\\%s'):format(ADDON_NAME, file)
     pcall(PlaySoundFile, path, 'Master')
 end
 
@@ -636,7 +647,8 @@ local function SetFlash(on)
 end
 
 ---------------------------------------------------------------- 状态机
-local function TriggerAlert()
+-- kind: 'warn' = 倒计时到点（提前预警）；'gone' = 已经没了。只有语音不同，文字是同一句。
+local function TriggerAlert(kind)
     if state.alerted then return end
     if state.suppressAlertsUntil and GetTime() < state.suppressAlertsUntil then return end
     local now = GetTime()
@@ -652,8 +664,9 @@ local function TriggerAlert()
     end
     state.alerted = true
     state.lastAlertAt = now
+    state.lastAlertKind = kind        -- 诊断用：哪一类判据真的发了声
     ShowText()
-    PlayVoice()
+    PlayVoice(kind)
     -- 蒙版跟着窗口走，而不是跟着那 3 秒文字走：文字收了图标还在闪，直到补盾为止
     SetFlash(true)
 end
@@ -723,7 +736,7 @@ local function UpdateCdmState()
                 -- 非战斗中静默（脱战前后掉盾属常态，不打扰）
                 local inCombat = InCombatLockdown()
                 ClearWindow()   -- 先清理（alerted 复位），保证此次提醒能触发
-                if inCombat then TriggerAlert() end
+                if inCombat then TriggerAlert('gone') end
                 return
             end
         end
@@ -741,7 +754,7 @@ local function UpdateCdmState()
         if now - state.ossDownSince >= DOWN_GRACE then
             state.ossUp = false
             -- 埋骨之所消失且骨盾仍在：触发提醒
-            if state.bsUp then TriggerAlert() end
+            if state.bsUp then TriggerAlert('gone') end
         end
     end
 end
@@ -764,7 +777,7 @@ driver:SetScript('OnUpdate', function()
 
     -- 1. 倒计时到点（玩家视角约剩 5 秒）：触发提醒
     if state.bsUp and state.timerEnd > 0 and now >= state.timerEnd then
-        TriggerAlert()
+        TriggerAlert('warn')
     end
 
     -- 2. 提醒文字超时自动隐藏（3 秒）
@@ -858,14 +871,6 @@ evt:SetScript('OnEvent', function(_, event, arg1, _, spellID)
         return
     end
 end)
-
----------------------------------------------------------------- 命令
-local function LangName()
-    local lang = DB.lang or 'auto'
-    if lang == 'cn' then return L.langCn end
-    if lang == 'en' then return L.langEn end
-    return L.langAuto
-end
 
 ---------------------------------------------------------------- 诊断：枚举 CDM 全部光环（名字 - ID）
 -- 参考 ActionbarEnhanced/Manual.lua：itemFramePool:EnumerateActive() 优先，
@@ -970,12 +975,11 @@ end
 
 local function PrintStatus()
     print(L.tag, ('%s | Interface %d'):format(ADDON_NAME, select(4, GetBuildInfo()) or 0))
-    print(('  %s: %s | %s: %s | %s: %s | %s: %s | %s: %s'):format(
+    print(('  %s: %s | %s: %s | %s: %s | %s: %s'):format(
         L.enabled, DB.enabled and L.on or L.off,
         L.sound, DB.sound and L.on or L.off,
         L.text, DB.text and L.on or L.off,
-        L.flash, DB.flash and L.on or L.off,
-        L.langName, LangName()))
+        L.flash, DB.flash and L.on or L.off))
     print('  ' .. (IsBlood() and L.bloodYes or L.bloodNo))
     print(('  %s: %s | %s: %s'):format(
         L.cdmBs, TrackDesc(bsFrames, bsProven),
@@ -987,12 +991,24 @@ local function PrintStatus()
     else
         print(('  timer: idle | %s: %s'):format(L.flash, mask))
     end
-    print('  ' .. L.help)
+    -- 上次提醒是哪一类：听声音之外，这里也能回头看（排查误报时最想知道的一条）
+    if state.lastAlertKind then
+        print(('  %s: %s (%.0fs ago)'):format(L.lastAlert,
+            state.lastAlertKind == 'warn' and L.reasonWarn or L.reasonGone,
+            math.max(GetTime() - (state.lastAlertAt or GetTime()), 0)))
+    end
 end
 
-local function Test()
+-- /bdk bs test [2]：不带参数 = 提前预警那条语音；带 2 = 已经没了那条。
+local function Test(kind)
+    kind = (kind == '2') and 'gone' or 'warn'
+    print(L.tag, ('voice: %s = %s'):format(
+        kind == 'gone' and L.reasonGone or L.reasonWarn,
+        kind == 'gone' and L.voiceGone or L.voiceWarn))
+    if kind == 'warn' then print(L.tag, '  ' .. L.testHintWarn)
+    else print(L.tag, '  ' .. L.testHintGone) end
     ShowText()
-    PlayVoice()
+    PlayVoice(kind)
     -- 顺带预览图标蒙版：挂到 CDM 里的骨盾图标上闪 3 秒。
     -- 已经处在真实提醒窗口里就不动它（否则会把正在闪的蒙版提前收掉）。
     if not flashWanted then
@@ -1018,41 +1034,59 @@ local function Test()
         flashWanted and L.on or L.off, #bsFrames, drawn))
 end
 
--- 主命令 /bdk；/bsr 保留为旧名兼容别名
-SLASH_BLOODDEATHKNIGHT1 = '/bdk'
-SLASH_BLOODDEATHKNIGHT2 = '/bsr'
-function SlashCmdList.BLOODDEATHKNIGHT(msg)
-    if not DB then return end
-    msg = (msg or ''):lower():gsub('%s+', ' '):gsub('^%s+', ''):gsub('%s+$', '')
+---------------------------------------------------------------- 命令登记
+-- 命令表（帮助文案、颜色、参数解析、分发）全在 Commands.lua；这里只登记本模块
+-- 做得了什么。加功能不必再碰主命令的分发逻辑。
+local CMD = _G.BloodDeathKnightCmd
+if not CMD then
+    CMD = {}
+    _G.BloodDeathKnightCmd = CMD
+end
 
-    if msg == '' or msg == 'help' or msg == '状态' then
+-- /bdk bs test —— 把提醒的三种表现各来一遍（红字 + 语音 + 图标蒙版 3 秒），
+-- 顺带打印帧/字体的自检数字。CDM 没配也能看样式。
+CMD[#CMD + 1] = {
+    name = 'bs test', arg = true,
+    order = 1,
+    zh   = '测试骨盾监控',
+    en   = 'test the bone shield monitor',
+    run  = function(arg)
+        if not IsBlood() then
+            print(L.tag, L.bloodNo)
+            return
+        end
+        Test(arg)
+    end,
+}
+
+-- /bdk bs sound —— 语音开关；不带参数就翻面（命令名说的是"切换"）
+CMD[#CMD + 1] = {
+    name = 'bs sound', arg = true,
+    order = 2,
+    zh   = '切换是否启用骨盾语音',
+    en   = 'toggle the bone shield voice',
+    run  = function(arg)
+        local on
+        if arg == nil then on = not DB.sound
+        elseif arg == 'on' or arg == '开' then on = true
+        elseif arg == 'off' or arg == '关' then on = false
+        else
+            print(L.tag, (L.usage):format('bs sound'))
+            return
+        end
+        DB.sound = on
+        print(L.tag, L.sound .. ': ' .. (on and L.on or L.off))
+    end,
+}
+
+-- /bdk debug —— 隐藏命令（帮助里不显示，避免玩家误按）：两个模块各登记一条，
+-- 分发器会把两条都跑完，"唯一调试指令"因此能一次摊开全部诊断。
+CMD[#CMD + 1] = {
+    name   = 'debug',
+    hidden = true,
+    run    = function()
         PrintStatus()
-    elseif msg == 'dump' or msg == '枚举' then
         DumpCdmAuras()
         DumpTracked()
-    elseif msg == 'test' or msg == '测试' then
-        Test()
-    elseif msg == 'sound on' or msg == '语音开' then
-        DB.sound = true; print(L.tag, L.sound .. ': ' .. L.on)
-    elseif msg == 'sound off' or msg == '语音关' then
-        DB.sound = false; print(L.tag, L.sound .. ': ' .. L.off)
-    elseif msg == 'text on' or msg == '文字开' then
-        DB.text = true; print(L.tag, L.text .. ': ' .. L.on)
-    elseif msg == 'text off' or msg == '文字关' then
-        DB.text = false; HideText(); print(L.tag, L.text .. ': ' .. L.off)
-    elseif msg == 'flash on' or msg == '闪烁开' or msg == '图标开' then
-        DB.flash = true; UpdateFlash(); print(L.tag, L.flash .. ': ' .. L.on)
-    elseif msg == 'flash off' or msg == '闪烁关' or msg == '图标关' then
-        DB.flash = false; StopAllFlash(); print(L.tag, L.flash .. ': ' .. L.off)
-    elseif msg == 'lang auto' or msg == 'lang cn' or msg == 'lang en' then
-        DB.lang = msg:match('(%a+)%s*$')
-        ApplyLang()
-        print(L.tag, L.langName .. ': ' .. LangName())
-    elseif msg == 'enable on' or msg == '启用' then
-        DB.enabled = true; StartDriver(); print(L.tag, L.enabled .. ': ' .. L.on)
-    elseif msg == 'enable off' or msg == '禁用' then
-        DB.enabled = false; driver:Hide(); ClearWindow(); HideText(); print(L.tag, L.enabled .. ': ' .. L.off)
-    else
-        print(L.tag, L.help)
-    end
-end
+    end,
+}

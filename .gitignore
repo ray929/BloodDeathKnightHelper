@@ -1,12 +1,65 @@
-# WorkBuddy 项目数据（记忆/会话），不进插件包
+# ============================================================
+#  AI / Vibe Coding —— 一律不进仓库
+# ============================================================
+
+# 本项目 AI 助手的工作目录（记忆 / 会话 / 技能）
 .workbuddy/
 
-# 系统垃圾
+# AI 编码助手的指令文件（agents.md / CLAUDE.md / GEMINI.md 等标准）
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+.cursorrules
+.aider*
+
+# AI 编码助手配置目录
+.claude/
+.cursor/
+.windsurf/
+.trae/
+.trae-cn/
+.zed/
+.continue/
+.codeium/
+.gemini/
+.roo/
+.cline/
+.kilo/
+.qoder/
+.cody/
+.tabnine/
+.augment/
+.sourcegraph/
+.bolt/
+.codebuddy/
+agenta/
+.rules/
+.roomodes
+.mcp.json
+CODEBUDDY.md
+opencode.json
+opencode.jsonc
+.github/copilot-instructions.md
+
+# ============================================================
+#  编辑器 / IDE
+# ============================================================
+.vscode/
+.idea/
+*.code-workspace
+*.sublime-*
+
+# ============================================================
+#  构建 / 发布产物（可重新生成）
+# ============================================================
+build/
+.release/
+*.zip
+
+# ============================================================
+#  系统垃圾
+# ============================================================
 Thumbs.db
 desktop.ini
 .DS_Store
 *~
-
-# 打包产物
-*.zip
-.release/
