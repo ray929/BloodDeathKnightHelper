@@ -303,5 +303,15 @@ bsItem.IsActive = false
 tick(4)                         -- 2s：去抖成立
 check('骨盾随后真的消失，再报一次（不被去重吞掉）', sounds() == 2, sounds())
 
+-- (d) 埋骨之所先掉、骨盾随后也掉：先后两条判据，打的是同一句话
+armWindow()
+tick(1)
+ossItem.IsActive = false
+tick(3)                         -- 1.5s：埋骨之所去抖成立，响一次
+check('埋骨之所掉了报一次', sounds() == 1, sounds())
+bsItem.IsActive = false
+tick(3)                         -- 1.5s：骨盾也掉了
+check('骨盾随后也掉，同一句话不重复响', sounds() == 1, sounds())
+
 io.write(('\n结果：%d 通过 / %d 失败\n'):format(passes, fails))
 os.exit(fails == 0 and 0 or 1)
