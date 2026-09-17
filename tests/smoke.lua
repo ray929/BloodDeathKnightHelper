@@ -94,14 +94,16 @@ check('未出现"缺失"', s:find('缺失', 1, true) == nil, s)
 check('未出现配置提示文字', s:find('拖入冷却管理器', 1, true) == nil, s)
 check('状态里能看到蒙版开关', s:find('图标蒙版: 开', 1, true) ~= nil, s)
 
-io.write('\n== T1 骨盾亮起 → 25s 倒计时到点 ==\n')
+io.write('\n== T1 骨盾亮起 → WARN_AFTER(24s) 倒计时到点 ==\n')
 bsItem.IsActive = true
 tick(2)
 check('骨盾在场，倒计时启动', cmd():find('timer: 2', 1, true) ~= nil)
 check('提醒前不挂蒙版', #bsItem.__kids == 0)
 
 resetSounds()
-tick(50)                                   -- 约 25 秒
+tick(45)                                   -- 累计 23.5s < WARN_AFTER(24s)：还没到点
+check('到点前不提醒', sounds() == 0, sounds())
+tick(4)                                    -- 累计 25.5s：越过 WARN_AFTER
 check('到点响了语音', sounds() == 1, sounds())
 check('到点显示了提醒文字', env.__alertText:GetText() == '补骨盾', env.__alertText:GetText())
 
@@ -188,7 +190,7 @@ ossItem:SetAlpha(1)
 tick(1)
 evt.__scripts.OnEvent(evt, 'UNIT_SPELLCAST_SUCCEEDED', 'player', nil, 195182)
 local st = cmd()
-check('施放后倒计时重置为 25s', st:find('timer: 24', 1, true) ~= nil or st:find('timer: 25', 1, true) ~= nil, st)
+check('施放后倒计时重置为 24s', st:find('timer: 24', 1, true) ~= nil, st)
 check('施放后蒙版清除（alpha 归零）', ov and ov.__alpha == 0, ov and ov.__alpha)
 check('施放后蒙版停止脉动', ov and ov.__scripts.OnUpdate == nil)
 check('施放后不再重复播报', env.__sounds and #env.__sounds == 0, #env.__sounds)

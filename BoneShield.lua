@@ -3,7 +3,7 @@
 --
 -- 当前功能：骨盾 / 埋骨之所 监控提醒
 --   触发逻辑（事件驱动，纯 CDM 实现，不使用 C_UnitAuras）：
---   1. 骨盾存在时启动 25 秒倒计时（骨盾固定持续 30 秒），到点时语音+文字 3 秒提醒一次，
+--   1. 骨盾出现时启动倒计时（骨盾固定持续 30 秒），约剩 5 秒时语音+文字 3 秒提醒一次，
 --      同时给 CDM 里的骨盾图标盖上脉冲红蒙版（视觉提醒，直到补盾或窗口重置）；
 --   2. 埋骨之所（Ossuary，骨盾 >= 5 层增益）消失时语音+文字 3 秒提醒一次；
 --   3. 施放任意会产生/刷新骨盾的技能时，立即隐藏文字、撤掉蒙版并重置倒计时；
@@ -16,7 +16,8 @@
 --   * 光环数据（层数/时间）在战斗中是 secret，本插件从不读取；
 --   * 存在性判断完全依赖 CDM 光环图标的 isActive 字段 / IsShown+alpha
 --     （暴雪自己消费 secret 后落地的明文布尔）；
---   * 骨盾固定 30 秒，用 25 秒倒计时覆盖最危险的最后 5 秒窗口。
+--   * 骨盾固定 30 秒，倒计时提前 6 秒触发（含检测延迟补偿，玩家看到约剩 5 秒），
+--     覆盖最危险的窗口。
 --
 -- 读数三态：读不到 != 没有了
 --   帧状态只有三种：在场 / 不在场 / 读不到。第三态一律"不下结论" —— 既不触发提醒，
@@ -30,7 +31,12 @@ local ADDON_NAME = ...
 local BONE_SHIELD  = 195181   -- 骨盾
 local OSSUARY      = 219786   -- 埋骨之所（常规 ID）
 local OSSUARY_ALT  = 219788   -- 埋骨之所（12.1 部分环境下实际出现的 ID）
-local WARN_AFTER   = 25       -- 骨盾存在 25 秒时提醒（覆盖最后 5 秒）
+local BONE_SHIELD_TIME = 30   -- 骨盾固定持续时间（秒）
+-- 提前多久提醒。名义上提前 6 秒，扣掉检测延迟（驱动 0.5 秒一拍：发现骨盾亮起最多晚
+-- 0.5 秒、到点又最多晚 0.5 秒触发，平均合计约 0.5 秒），玩家实际看到的是"还剩 5 秒"
+-- 左右。想让提醒更早/更晚，只改这一个数。
+local WARN_LEAD    = 6
+local WARN_AFTER   = BONE_SHIELD_TIME - WARN_LEAD   -- = 24，倒计时长度
 local TEXT_DURATION = 3       -- 提醒文字显示时长
 local DOWN_GRACE   = 1.0      -- "不在场"需连续成立多久才被承认。必须明显大于驱动周期（0.5s），
                               -- 否则去抖就等于"一拍读数直接下结论"，等于没有去抖
@@ -434,7 +440,7 @@ end
 local state = {
     bsUp = false,      -- 骨盾当前是否存在
     ossUp = false,     -- 埋骨之所当前是否存在
-    timerEnd = 0,      -- 25 秒倒计时结束时间
+    timerEnd = 0,      -- 倒计时结束时间（= 骨盾被观察到在场的时刻 + WARN_AFTER）
     alerted = false,   -- 当前窗口是否已经触发过提醒
     showingSetup = false,  -- 当前显示的是配置提示还是提醒
     hideAt = nil,      -- 提醒文字自动隐藏时间（由驱动循环检查）
@@ -671,7 +677,7 @@ local function UpdateCdmState()
 
     -- ---- 骨盾 ----
     if not bsKnown then
-        -- 读不到：不下结论。不产生"掉了"事件，也不清掉既有状态；25 秒倒计时照走
+        -- 读不到：不下结论。不产生"掉了"事件，也不清掉既有状态；倒计时照走
         -- —— 它本来就是我们唯一能依赖的东西。
     elseif bsUp then
         state.bsDownSince = nil
@@ -732,7 +738,7 @@ driver:SetScript('OnUpdate', function()
 
     if not IsBlood() then SetFlash(false) return end
 
-    -- 1. 25 秒倒计时到点：触发提醒
+    -- 1. 倒计时到点（玩家视角约剩 5 秒）：触发提醒
     if state.bsUp and state.timerEnd > 0 and now >= state.timerEnd then
         TriggerAlert()
     end
@@ -821,7 +827,7 @@ evt:SetScript('OnEvent', function(_, event, arg1, _, spellID)
         if REFRESH_IDS[spellID] and IsBlood() then
             HideText()                -- 立即隐藏文字
             state.bsUp = true         -- 施放刷新技能即视为骨盾存在
-            ResetWindow()             -- 启用/重置 25 秒倒计时
+            ResetWindow()             -- 启用/重置倒计时
             -- CDM 帧更新通常晚于施法成功事件；宽限 0.8 秒，防止下一拍扫描把瞬态空窗误判为骨盾消失
             state.suppressAlertsUntil = GetTime() + 0.8
         end
