@@ -8,6 +8,8 @@
 --   2. 埋骨之所（Ossuary，骨盾 >= 5 层增益）消失时语音+文字 3 秒提醒一次；
 --   3. 施放任意会产生/刷新骨盾的技能时，立即隐藏文字、撤掉蒙版并重置倒计时；
 --   4. 骨盾彻底消失时停止一切提醒。
+--   5. 三条判据打出来的是同一句话，所以 2 秒内只发一次声（ALERT_GAP）——
+--      它们可能在同一拍或半秒内接连成立，重复发声纯属噪音；视觉照旧维持。
 --
 -- 前提条件：玩家需把「骨盾」和「埋骨之所」拖入暴雪冷却管理器（CDM）。
 -- 若持续检测不到对应 CDM 条目，屏幕 1/3 处常驻提示文字，指导玩家配置。
@@ -38,6 +40,13 @@ local BONE_SHIELD_TIME = 30   -- 骨盾固定持续时间（秒）
 local WARN_LEAD    = 6
 local WARN_AFTER   = BONE_SHIELD_TIME - WARN_LEAD   -- = 24，倒计时长度
 local TEXT_DURATION = 3       -- 提醒文字显示时长
+-- 三条判据（倒计时到点 / 骨盾掉了 / 埋骨之所掉了）触发的是**同一句话** —— 同一行红字、
+-- 同一段语音。它们完全可能在同一拍或半秒内接连成立：最典型的是倒计时到点的那一拍，
+-- 恰好"骨盾读到不在场"也刚满 1 秒去抖（掉盾起始点落在到点前 1.0s → 同一拍；
+-- 落在到点前 0.5s → 半秒后）。这时再响一遍纯属噪音，所以给"真的发声"加一个最小间隔。
+-- 注意这个间隔要**大于**上面那个 0.5s 的对齐窗口、又必须**小于**骨盾真到期时的间隔
+-- （到点提醒 → 6 秒后真掉盾 → 再报），否则会把"骨盾真的没了"那一声误吞。2 秒两头都安全。
+local ALERT_GAP    = 2.0
 local DOWN_GRACE   = 1.0      -- "不在场"需连续成立多久才被承认。必须明显大于驱动周期（0.5s），
                               -- 否则去抖就等于"一拍读数直接下结论"，等于没有去抖
 local ABSENT_GRACE = 3        -- CDM 条目"持续"扫不到多久才算没配置（池化帧会瞬态消失）
@@ -445,6 +454,9 @@ local state = {
     showingSetup = false,  -- 当前显示的是配置提示还是提醒
     hideAt = nil,      -- 提醒文字自动隐藏时间（由驱动循环检查）
     suppressAlertsUntil = nil, -- 施放刷新技能后的宽限期，避免 CDM 更新延迟导致误报
+    lastAlertAt = nil, -- 上次"真的发声"的时刻。跨窗口有效 —— 不能被 ResetWindow /
+                       -- ClearWindow 清掉，否则去重就是摆设（去重要挡的正是"窗口刚被
+                       -- 清掉、下一条判据立刻又成立"这个情形）。
     bsDownSince = nil, -- 骨盾"读到不在场"的起始时刻（DOWN_GRACE 去抖用）
     ossDownSince = nil,-- 埋骨之所同上
 }
@@ -627,7 +639,19 @@ end
 local function TriggerAlert()
     if state.alerted then return end
     if state.suppressAlertsUntil and GetTime() < state.suppressAlertsUntil then return end
+    local now = GetTime()
+    -- 刚响过：这次是同一个窗口里另一条判据紧接着成立，消息一模一样，只吞掉声音。
+    -- 但视觉必须补回来 —— 走到这里之前，掉盾那条路已经 ClearWindow() 把红字和蒙版
+    -- 撤掉了；不补的话，玩家刚听到一声"补骨盾"，字和蒙版却同时消失了。
+    -- 另外要把窗口标记成"已提醒"：否则下一拍这条判据又会来一次，变成 2 秒后补一枪。
+    if state.lastAlertAt and now - state.lastAlertAt < ALERT_GAP then
+        state.alerted = true
+        ShowText()
+        SetFlash(true)
+        return
+    end
     state.alerted = true
+    state.lastAlertAt = now
     ShowText()
     PlayVoice()
     -- 蒙版跟着窗口走，而不是跟着那 3 秒文字走：文字收了图标还在闪，直到补盾为止

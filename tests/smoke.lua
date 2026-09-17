@@ -242,5 +242,66 @@ check('只跟到一个帧，不是两条条目', dd:find('埋骨之所(CDM): fra
 check('角色标签区分主 ID 与关联 ID', dd:find('ids=spell=219786 linked=219788', 1, true) ~= nil, dd)
 env.__inCombat = true
 
+io.write('\n== T11 同一窗口内的重复提醒 ==\n')
+-- 倒计时到点 / 骨盾掉了 / 埋骨之所掉了 三条判据打出来的是**同一句话**（同一行红字、
+-- 同一段语音），而它们完全可能在同一拍或半秒内接连成立。下面三种对齐是刻意构造的：
+-- 让"骨盾读到不在场"的起始时刻落在倒计时到点前 1.0 秒 / 0.5 秒。
+local function armWindow()
+    -- 重新摆成"骨盾在场"，跑一拍让状态机认到 → 开一个新窗口（timerEnd = 现在 + 24）
+    ossItem.IsActive = true
+    ossItem:Show()
+    ossItem:SetAlpha(1)
+    bsItem.IsActive = true
+    bsItem:Show()
+    bsItem:SetAlpha(1)
+    tick(1)
+    resetSounds()
+end
+
+local function findFrame(name)
+    for i = 1, #ENV.frames do
+        if ENV.frames[i].__name == name then return ENV.frames[i] end
+    end
+end
+
+local function bsOverlay()
+    for i = 1, #bsItem.__kids do
+        if bsItem.__kids[i].fill then return bsItem.__kids[i] end
+    end
+end
+
+-- (a) 不在场起始于到点前 1.0 秒：去抖恰好与倒计时到点落在同一拍
+armWindow()
+tick(45)                        -- 到点前 1.5s
+bsItem.IsActive = false
+tick(1)                         -- 到点前 1.0s：bsDownSince 起算
+tick(1)                         -- 到点前 0.5s
+tick(1)                         -- 到点：倒计时 + 去抖同时成立
+check('同一拍内只响一次', sounds() == 1, sounds())
+
+-- (b) 不在场起始于到点前 0.5 秒：到点响一次，半秒后去抖成立又想响一次
+armWindow()
+tick(46)                        -- 到点前 1.0s
+bsItem.IsActive = false
+tick(1)                         -- 到点前 0.5s：bsDownSince 起算
+tick(1)                         -- 到点：响第一次
+check('到点响了', sounds() == 1, sounds())
+tick(1)                         -- 到点后 0.5s：去抖成立
+check('半秒内不重复响', sounds() == 1, sounds())
+-- 去重只吞声音，视觉必须留着：掉盾那条路已经 ClearWindow() 撤过一次红字和蒙版
+local af = findFrame('BloodDeathKnightAlert')
+check('去重后红字仍在屏幕上', af and af.__shown == true)
+local mask = bsOverlay()
+check('去重后蒙版仍在闪', mask ~= nil and mask.__scripts.OnUpdate ~= nil)
+
+-- (c) 真实情形不能被去重误伤：到点提醒后骨盾又撑了 6 秒才真到期，这一声必须还在
+armWindow()
+tick(48)                        -- 24s：倒计时到点
+check('到点提醒响了', sounds() == 1, sounds())
+tick(12)                        -- 再撑 6 秒（骨盾真正的到期时刻）
+bsItem.IsActive = false
+tick(4)                         -- 2s：去抖成立
+check('骨盾随后真的消失，再报一次（不被去重吞掉）', sounds() == 2, sounds())
+
 io.write(('\n结果：%d 通过 / %d 失败\n'):format(passes, fails))
 os.exit(fails == 0 and 0 or 1)
