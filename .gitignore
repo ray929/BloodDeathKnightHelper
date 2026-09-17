@@ -1,0 +1,12 @@
+# WorkBuddy 项目数据（记忆/会话），不进插件包
+.workbuddy/
+
+# 系统垃圾
+Thumbs.db
+desktop.ini
+.DS_Store
+*~
+
+# 打包产物
+*.zip
+.release/

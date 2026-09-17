@@ -1,0 +1,6 @@
+package-as: BloodDeathKnight
+enable-nolib-creation: no
+
+ignore:
+  - docs
+  - README.md

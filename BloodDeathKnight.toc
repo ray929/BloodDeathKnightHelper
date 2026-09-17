@@ -1,0 +1,15 @@
+## Interface: 120100
+## AllowLoadGameType: mainline
+## Title: BloodDeathKnight
+## Title-zhCN: 鲜血死亡骑士辅助
+## Notes: Blood Death Knight helper.
+## Notes-zhCN: 鲜血死亡骑士辅助提醒工具。
+## Author: ray929
+## Version: @project-version@
+## X-Curse-Project-ID: 0
+## IconTexture: Interface\Icons\Spell_Deathknight_BloodPresence
+## SavedVariables: BloodDeathKnightDB
+## DefaultState: enabled
+## Category: Combat
+
+BoneShield.lua
