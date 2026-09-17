@@ -167,11 +167,50 @@ end
 
 local BS_ID_SET = { [BONE_SHIELD] = true }
 
-local function FrameIsSpell(f, ids)
-    if not f or not f.GetCooldownID then return false end
+-- 取条目 cooldownInfo 里的全部候选 ID，带角色标签返回 { {role, id}, ... }。两个用途：
+--   * 诊断输出（spell= / override= / tooltip= / linked=）—— 把"一个条目携带多个 ID"
+--     这件事直接摊开。埋骨之所就是这种条目：只打裸 ID 会让人误读成"两个条目"，
+--     进而以为要在两个 ID 之间做选择（实际是同一个条目的两个 ID，拖哪个都一样）。
+--   * want 传入关心的 id 集合时，只挑出命中的那几个。
+-- 匹配判定本身另见 CooldownMatches（那边只关心"有没有命中"，不关心角色）。
+local function CooldownCandidates(cooldownID, want)
+    local get = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
+    if not get or not cooldownID or IsSecret(cooldownID) then return {} end
+    local ok, info = pcall(get, cooldownID)
+    if not ok or type(info) ~= 'table' then return {} end
+    local out = {}
+    local function put(role, id)
+        if type(id) ~= 'number' or id <= 0 or IsSecret(id) then return end
+        if want and not want[id] then return end
+        out[#out + 1] = { role, id }
+    end
+    put('spell',   info.spellID)
+    put('override', info.overrideSpellID)
+    put('tooltip', info.overrideTooltipSpellID)
+    put('linked',  info.linkedSpellID)
+    if type(info.linkedSpellIDs) == 'table' then
+        for i = 1, #info.linkedSpellIDs do put('linked', info.linkedSpellIDs[i]) end
+    end
+    return out
+end
+
+local function JoinCandidates(list)
+    local parts = {}
+    for i = 1, #list do parts[i] = list[i][1] .. '=' .. list[i][2] end
+    return table.concat(parts, ' ')
+end
+
+local function FrameCdID(f)
+    if not f or not f.GetCooldownID then return nil end
     local ok, id = pcall(f.GetCooldownID, f)
-    if ok and id then return CooldownMatches(id, ids) end
-    return false
+    if ok and id and not IsSecret(id) then return id end
+    return nil
+end
+
+local function FrameIsSpell(f, ids)
+    local id = FrameCdID(f)
+    if not id then return false end
+    return CooldownMatches(id, ids)
 end
 
 -- isActive 是暴雪自己 ShouldBeShown 所看的标志，且是帧上的普通成员 —— 所以它既在
@@ -220,12 +259,9 @@ end
 -- （见 ABSENT_GRACE / ConfigMissing）。
 local bsFrames, ossFrames = {}, {}
 
--- 帧认证表：帧被"亲眼看到亮过"才记一笔。用途有两个 ——
---   * 挡诱饵：别家换皮插件会把不用的 viewer 帧停在幕后常暗不亮，这种帧若被当成
---     "骨盾不在场"，就会变成一次凭空来的补盾提醒；亮过一次的帧才允许给出"不在场"。
---   * 挡配置错：埋骨之所那两个 ID（219786 / 219788）里有一个是被动天赋本体，
---     拖进 CDM 能匹配上条目但永远不会亮 —— 那种帧永远拿不到认证，也就永远不肯说
---     "不在场"，于是不会污染读数。
+-- 帧认证表：帧被"亲眼看到亮过"才记一笔。用途是挡诱饵 ——
+-- 别家换皮插件会把不用的 viewer 帧停在幕后常暗不亮，这种帧若被当成"骨盾不在场"，
+-- 就会变成一次凭空来的补盾提醒；亮过一次的帧才允许给出"不在场"。
 -- 注意：只加在"看图标画没画"这条退路上。isActive 路径读到真值就直接相信，不要求认证
 -- —— 在那边要求认证，正是"屏幕上看什么都对、插件却一直沉默"的来源。
 local bsProven  = setmetatable({}, { __mode = 'k' })
@@ -804,63 +840,45 @@ end
 ---------------------------------------------------------------- 诊断：枚举 CDM 全部光环（名字 - ID）
 -- 参考 ActionbarEnhanced/Manual.lua：itemFramePool:EnumerateActive() 优先，
 -- 无则兜底 GetItemFrames()；cooldownID 直读 frame 字段再兜底 GetCooldownID()。
+--
+-- 输出粒度是**一个条目一行**，条目携带的全部候选 ID 打在同一行里（cdID 相同的帧只打
+-- 一次）。之前的写法是"一个 ID 一行"，于是一条携带 spell+linked 的条目看起来像两条
+-- 独立条目 —— 埋骨之所就被误读成"219786 / 219788 两条，得挑对的那条"。
 local function DumpCdmAuras()
     print(L.tag, 'CDM auras:')
-    local seen, count = {}, 0
+    local dumped, count = {}, 0
     for v = 1, #ALL_VIEWERS do
         local viewer = _G[ALL_VIEWERS[v]]
         if viewer then
-            -- 收集帧：三个来源都用上（池化活动帧 / GetChildren 递归 / GetItemFrames）
             local frames = {}
             CollectFrames(viewer, frames, {})
-
-            do
-                for i = 1, #frames do
-                    local f = frames[i]
-                    local cdID = f.cooldownID or (f.cooldownInfo and f.cooldownInfo.cooldownID)
-                    if not cdID and f.GetCooldownID then
-                        local ok, id = pcall(f.GetCooldownID, f)
-                        if ok then cdID = id end
-                    end
-                    if cdID and not IsSecret(cdID)
-                        and C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo then
-                        local ok, info = pcall(C_CooldownViewer.GetCooldownViewerCooldownInfo, cdID)
-                        if ok and info then
-                            -- 收集全部候选 ID（spellID/override/tooltip/linked）
-                            local ids = {}
-                            local function add(id)
-                                if id and id > 0 and not IsSecret(id) and not seen[id] then
-                                    seen[id] = true
-                                    ids[#ids + 1] = id
-                                end
-                            end
-                            add(info.spellID)
-                            add(info.overrideSpellID)
-                            add(info.overrideTooltipSpellID)
-                            add(info.linkedSpellID)
-                            if type(info.linkedSpellIDs) == 'table' then
-                                for _, id in ipairs(info.linkedSpellIDs) do add(id) end
-                            end
-
-                            for j = 1, #ids do
-                                local id = ids[j]
-                                if not seen['__dumped' .. id] then
-                                    seen['__dumped' .. id] = true
-                                    count = count + 1
-                                    local name = '?'
-                                    if C_Spell and C_Spell.GetSpellInfo then
-                                        local okN, si = pcall(C_Spell.GetSpellInfo, id)
-                                        if okN and si and si.name then name = si.name end
-                                    end
-                                    -- 标注插件关心的两个光环
-                                    local mark = ''
-                                    if id == BONE_SHIELD then mark = '  <- BONE_SHIELD' end
-                                    if OSSUARY_ID_SET[id] then mark = '  <- OSSUARY' end
-                                    print(('  [%s] %s - %d%s'):format(
-                                        ALL_VIEWERS[v]:gsub('CooldownViewer', ''), name, id, mark))
-                                end
-                            end
+            local tag = ALL_VIEWERS[v]:gsub('CooldownViewer', '')
+            for i = 1, #frames do
+                local f = frames[i]
+                local cdID = FrameCdID(f)
+                if not cdID then
+                    cdID = f.cooldownID or (f.cooldownInfo and f.cooldownInfo.cooldownID)
+                    if IsSecret(cdID) then cdID = nil end
+                end
+                if cdID and not dumped[cdID] then
+                    dumped[cdID] = true
+                    local cands = CooldownCandidates(cdID)
+                    if #cands > 0 then
+                        count = count + 1
+                        local name = '?'
+                        if C_Spell and C_Spell.GetSpellInfo then
+                            local okN, si = pcall(C_Spell.GetSpellInfo, cands[1][2])
+                            if okN and si and si.name then name = si.name end
                         end
+                        -- 标注插件关心的两个光环
+                        local mark = ''
+                        for k = 1, #cands do
+                            local id = cands[k][2]
+                            if id == BONE_SHIELD then mark = '  <- BONE_SHIELD'
+                            elseif OSSUARY_ID_SET[id] then mark = '  <- OSSUARY' end
+                        end
+                        print(('  [%s] cdID=%d %s  (%s)%s'):format(
+                            tag, cdID, name, JoinCandidates(cands), mark))
                     end
                 end
             end
@@ -873,19 +891,17 @@ end
 
 ---------------------------------------------------------------- 诊断：本插件关心的两个条目的读数
 -- 把三态读数的每一层都摊开，用来回答"到底是配置错了、还是读不到"：
---   frames   —— 扫到几个帧
---   spell    —— 该帧匹配上了哪个候选 ID（埋骨之所那两个 ID 靠这一行定性）
---   isActive —— isActive 字段能否读到明文布尔（unreadable = 读不到）
---   proven   —— 有没有被亲眼看到亮过。proven=no 的埋骨之所帧 = 拖进 CDM 了但从未亮过，
---               很可能拖的是被动天赋本体那种不会亮的条目（它会让提醒静默失效）
---   drawn    —— 图标此刻是否被画出来
+--   frames  —— 扫到几个帧
+--   cdID    —— 帧对应的 CDM 冷却 ID，可与上面那张表交叉对照
+--   ids     —— 该帧命中了关心的哪些 ID，带角色标签。埋骨之所那条会同时列出 spell= 和
+--              linked=，一眼看出它是"一个条目的两个 ID"，不是要在两个 ID 之间二选一
+--   isActive—— isActive 字段能否读到明文布尔（unreadable = 读不到）
+--   proven  —— 有没有被亲眼看到亮过
+--   drawn   —— 图标此刻是否被画出来。proven=no 且 drawn=no = 拖进 CDM 了但从未亮过，
+--              这条条目不会给插件任何信号（提醒静默失效），该去检查拖的是不是想要的增益
 local function FrameMatchedIDs(f, idSet)
-    local out = {}
-    for id in pairs(idSet) do
-        if FrameIsSpell(f, { [id] = true }) then out[#out + 1] = id end
-    end
-    table.sort(out)
-    return table.concat(out, ',')
+    local s = JoinCandidates(CooldownCandidates(FrameCdID(f), idSet))
+    return s ~= '' and s or '?'
 end
 
 local function DumpTracked()
@@ -897,10 +913,11 @@ local function DumpTracked()
         for i = 1, #list do
             local f = list[i]
             local flag = FrameFlag(f)
-            local ids = FrameMatchedIDs(f, idSet)
-            print(('    [%d] spell=%s isActive=%s proven=%s drawn=%s'):format(
+            local cdID = FrameCdID(f)
+            print(('    [%d] cdID=%s ids=%s isActive=%s proven=%s drawn=%s'):format(
                 i,
-                ids ~= '' and ids or '?',
+                cdID and tostring(cdID) or '?',
+                FrameMatchedIDs(f, idSet),
                 flag == nil and 'unreadable' or tostring(flag),
                 proven[f] and 'yes' or 'no',
                 FrameDrawn(f) and 'yes' or 'no'))
@@ -908,7 +925,7 @@ local function DumpTracked()
     end
     line(L.cdmBs,  bsFrames,  BS_ID_SET,      bsProven)
     line(L.cdmOss, ossFrames, OSSUARY_ID_SET, ossProven)
-    print('  (Ossuary with proven=no has never been seen lit - re-check which entry you dragged into the CDM)')
+    print('  (proven=no & drawn=no = that entry has never lit - it will report nothing; check the CDM entry)')
 end
 
 -- 条目描述：扫到几个帧，其中几个被亲眼看到亮过

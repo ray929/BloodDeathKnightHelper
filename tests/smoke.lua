@@ -49,7 +49,9 @@ end
 
 ------------------------------------------------------------------ 搭建 CDM
 env.addCooldown(1, { spellID = 195181 })   -- 骨盾
-env.addCooldown(2, { spellID = 219786 })   -- 埋骨之所（候选 ID 一）
+-- 埋骨之所：实测形态是**一个** cooldownInfo 同时带 spellID 与 linkedSpellID
+-- （游戏里 /bdk dump 打出来是 spell=219786 linked=219788，同一个 cdID）
+env.addCooldown(2, { spellID = 219786, linkedSpellID = 219788 })
 
 local viewer = ENV.makeViewer({ 1, 2 })
 env.BuffIconCooldownViewer = viewer
@@ -214,6 +216,29 @@ clearLines()
 tick(2)
 check('非鲜血专精无倒计时且无蒙版', cmd():find('timer: idle', 1, true) ~= nil)
 check('非鲜血专精时不打蒙版', ov and ov.__alpha == 0, ov and ov.__alpha)
+
+io.write('\n== T10 一个条目携带两个 ID（埋骨之所的实测形态） ==\n')
+-- 回归：/bdk dump 曾经"一个 ID 一行"，于是一条 spell+linked 的条目看起来像两条独立
+-- 条目，会被误读成"得在两个 ID 之间挑对的那个"。诊断必须打成一行。
+env.__spec = 1
+env.__inCombat = false
+clearLines()
+tick(1)
+local dd = cmd('dump')
+local function countOf(s, pat)
+    local n, pos = 0, 1
+    while true do
+        local _, b = s:find(pat, pos, true)
+        if not b then return n end
+        n = n + 1
+        pos = b + 1
+    end
+end
+check('两个 ID 只占一个条目行', countOf(dd, '<- OSSUARY') == 1, dd)
+check('条目行把两个 ID 摊在同一行', dd:find('(spell=219786 linked=219788)', 1, true) ~= nil, dd)
+check('只跟到一个帧，不是两条条目', dd:find('埋骨之所(CDM): frames=1', 1, true) ~= nil, dd)
+check('角色标签区分主 ID 与关联 ID', dd:find('ids=spell=219786 linked=219788', 1, true) ~= nil, dd)
+env.__inCombat = true
 
 io.write(('\n结果：%d 通过 / %d 失败\n'):format(passes, fails))
 os.exit(fails == 0 and 0 or 1)
