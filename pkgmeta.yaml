@@ -2,10 +2,16 @@ package-as: BloodDeathKnightHelper
 enable-nolib-creation: no
 
 # 打包时排除开发资料：发布出去的 zip 只含 toc + 三个 lua + Sounds/
+#
+# 发布**不需要 .github / GitHub Action** —— CF 的打包器直接从 GitHub 仓库拉取打包：
+# 在仓库 Settings → Webhooks 配一次 CF 给的 webhook URL，之后打 tag 推送就自动出包。
+# 详见 AGENTS.md 第 6 节。
+#
+# 点开头的路径（.git / .gitattributes / .workbuddy …）CF 会自动忽略，下面再列一遍只是
+# 把意图写明白；真正必须挡的是 tests / README.md / AGENTS.md 这些非点开头的开发资料。
 ignore:
   - .gitignore
   - .gitattributes
-  - .github
   - .workbuddy
   - AGENTS.md
   - README.md
