@@ -7,7 +7,10 @@
 --      同时给 CDM 里的骨盾图标盖上脉冲红蒙版（视觉提醒，直到补盾或窗口重置）；
 --   2. 埋骨之所（Ossuary，骨盾 >= 5 层增益）消失时语音+文字 3 秒提醒一次；
 --   3. 骨盾彻底消失时停止一切提醒。
---   4. 施放任意会产生/刷新骨盾的技能时，立即隐藏文字、撤掉蒙版并重置倒计时；
+--   4. 施放任意会产生/刷新骨盾的技能时，立即隐藏文字、撤掉蒙版并重置倒计时。
+--      "会刷新"这件事取决于**前置天赋有没有点**（符文刃舞←不竭之刃；死亡之握/血魔之握/
+--      憎恶之肢←拾骨者），所以每个技能都过一道天赋闸门（见文件上方的 GATES 表）；
+--      没点天赋却当成刷新 → 倒计时被无谓重置 → 该提醒时反而不提醒。
 --   5. 三条判据各有自己的红字文案与语音（见 L.kinds，/bdk bs test 1|2|3 可逐条试听）：
 --        bsGone  骨盾没了      ← voice-cn-1.mp3
 --        ossGone 骨盾层数不够  ← voice-cn-2.mp3
@@ -68,10 +71,13 @@ local ABSENT_GRACE = 3        -- CDM 条目"持续"扫不到多久才算没配�
 --   195292  Death's Caress       死神的抚摩 —— 描述 "generating 2 Bone Shield charges"
 --   49028   Dancing Rune Weapon  符文刃舞 —— 给 5 层。⚠️ 技能自身描述**不提骨盾**
 --                              （12.1 只有 "mirrors your melee attacks" + 30% 招架），
---                              给层数来自 **Crimson Rune Weapon** 天赋："Dancing Rune
---                              Weapon generates 5 Bone Shield charges"。用户 2026-09-18
---                              游戏内实测确认（DRW 后骨盾刷回 30 秒 / 5 层）。
+--                              给层数的其实是**天赋不竭之刃 Insatiable Blade**(377637)：
+--                              "Dancing Rune Weapon's cooldown is reduced by 30 sec and
+--                               now generates 5 Bone Shield charges"（12.0.0 改的）。
+--                              用户 2026-09-18 游戏内实测确认（DRW 后骨盾刷回 30 秒 / 5 层）。
 --                              只看技能描述就会以为它不产骨盾 —— 我们因此误删过一次。
+--                              （更早误归给暗影国度的符文铭刻之力 Crimson Rune Weapon，
+--                                那是过时页面；12.x 的来源就是这条天赋，闸门用的也是它。）
 --   49576   Death Grip           死亡之握 ┐ 拾骨者天赋（Bone Collector, 458572）：
 --   108199  Gorefiend's Grasp   血魔之握 ┘ "When you would pull an enemy generate
 --   1263569 Abomination Limb    憎恶之肢   1 charge of Bone Shield"，Affects 正是前两个；
@@ -86,6 +92,93 @@ local REFRESH_IDS = {
     [108199]  = 0,   -- Gorefiend's Grasp 血魔之握
     [1263569] = 12,  -- Abomination Limb 憎恶之肢：持续 12 秒、每秒拉一次
 }
+
+-- ============================ 前置天赋闸门 ============================
+-- 上面几个技能**是不是真的产骨盾，取决于有没有点对应天赋**。没点却把施法当刷新，
+-- 倒计时会被无谓重置 → 该提醒的时候不提醒（漏报）；反过来漏掉一个真会刷新的技能，
+-- 则会在骨盾还剩十几秒时就喊话（误报）。两种错都要防，所以给每个技能配一道闸门。
+--
+-- 值 = 该技能的**前置天赋**法术 ID（id 逐个在 warcraft.wiki.gg 核实）：
+local GATES = {
+    [49028]   = 377637,  -- 符文刃舞 ← 不竭之刃 Insatiable Blade
+                         --   "Dancing Rune Weapon's cooldown is reduced by 30 sec and
+                         --    **now generates 5 Bone Shield charges**"（12.0.0 起）
+                         --   ⚠️ 技能自身描述不提骨盾，给层数写在这个天赋里
+    [49576]   = 458572,  -- 死亡之握 ┐
+    [108199]  = 458572,  -- 血魔之握 ├ 拾骨者 Bone Collector：
+    [1263569] = 458572,  -- 憎恶之肢 ┘   "When you would pull an enemy generate 1 charge
+                         --                 of Bone Shield"，Affects 正是前两个；
+                         --                憎恶之肢由 2026-03-06 的 hotfix 明确也会给层
+}
+-- 骨髓打击 / 死神的抚摩没有前置天赋（骨盾的本体来源），不在表里 = 闸门常开。
+
+-- 天赋名的显示用（debug 输出）。key = 天赋法术 ID，与 GATES 的值对应。
+local GATE_NAMES = {
+    zh = {
+        [377637] = '不竭之刃',
+        [458572] = '拾骨者',
+    },
+    en = {
+        [377637] = 'Insatiable Blade',
+        [458572] = 'Bone Collector',
+    },
+}
+
+-- 闸门缓存：天赋ID → true / false / nil(读不到)。
+-- **天赋是静态数据**（只有非战斗时才能改），所以打赢一次缓存起来重复用，战斗中
+-- 绝不调用检测 API —— 12.x 的 secret 体系里，战斗中能问什么、不能问什么很难穷举，
+-- 而"静态数据在非战斗时读一次"天然绕开这个雷区。
+local gateCache = {}
+local gateCacheAt = nil
+
+-- 读"玩家有没有学会这个法术"。天赋点出来后，那个被动法术就进了玩家的法术列表，
+-- 所以 IsSpellKnown 系列能直接反映天赋有没有点。
+-- 返回 true / false / nil（nil = 没有任何可用读数，调用方据此 fail-open）。
+local function GateRead(spellID)
+    -- 12.x：C_SpellBook.IsSpellKnown（11.2.0 起，替代已废弃的 IsPlayerSpell）。
+    -- 三个都试：不同客户端/版本上留下的可能不是同一套，多一条退路不亏。
+    local fns = {
+        C_SpellBook and C_SpellBook.IsSpellKnown,
+        C_Spell and C_Spell.IsSpellKnown,
+        IsPlayerSpell,
+    }
+    for i = 1, #fns do
+        local f = fns[i]
+        if type(f) == 'function' then
+            local ok, v = pcall(f, spellID)
+            -- 只认真正的 boolean：secret 值不是 boolean，pcall 失败也不是 ——
+            -- 这两种都算"读不到"，继续找下一个 API。
+            if ok and type(v) == 'boolean' then return v end
+        end
+    end
+    return nil
+end
+
+-- 重读全部闸门。战斗中直接放弃（下次脱战后驱动循环会补），返回是否真的读了。
+local function RefreshGates()
+    if InCombatLockdown() then return false end
+    local seen = {}
+    for _, tid in pairs(GATES) do
+        if not seen[tid] then
+            seen[tid] = true
+            gateCache[tid] = GateRead(tid)
+        end
+    end
+    gateCacheAt = GetTime()
+    return true
+end
+
+-- 这个技能此刻算不算刷新源。
+-- ⚠️ 读不到天赋时 **fail-open**（当作点了）：读不到是"我们不知道"，不是"玩家没点"。
+-- 这时维持改动前的行为（一律当刷新源），代价最多是漏一次预警 —— 比反过来的
+-- "天赋明明点了却被我们判成没点、于是真掉盾时才喊"要轻得多。
+local function GateOpen(spellID)
+    local tid = GATES[spellID]
+    if not tid then return true end        -- 无前置天赋：常开
+    local v = gateCache[tid]
+    if v == nil then return true end       -- 读不到：不冤枉它
+    return v
+end
 
 local VIEWERS = { 'BuffIconCooldownViewer', 'BuffBarCooldownViewer' }
 local OSSUARY_ID_SET = { [OSSUARY] = true, [OSSUARY_ALT] = true }
@@ -129,6 +222,13 @@ local function ApplyLang()
         }
         L.kindOrder = { 'bsGone', 'ossGone', 'warn' }
         L.lastAlert = '上次提醒'
+        -- 天赋闸门（debug 用）：id 要与文件上方 GATES 里的值一致
+        L.gateLabel = '天赋闸门'
+        L.gateYes, L.gateNo, L.gateUnknown = '已点', '未点', '读不到'
+        L.gateList = {
+            { id = 377637, name = '不竭之刃', skill = '符文刃舞' },
+            { id = 458572, name = '拾骨者',   skill = '死亡之握/血魔之握/憎恶之肢' },
+        }
         L.testHint = '用法：/bdk bs test 1|2|3（1=骨盾没了 2=骨盾层数不够 3=骨盾快没了）'
     else
         L.setupText = 'Drag "Bone Shield" and "Ossuary" into the Cooldown Manager (CDM)'
@@ -152,6 +252,13 @@ local function ApplyLang()
         }
         L.kindOrder = { 'bsGone', 'ossGone', 'warn' }
         L.lastAlert = 'last alert'
+        -- talent gates (debug only): ids must match the GATES table near the top
+        L.gateLabel = 'talent gates'
+        L.gateYes, L.gateNo, L.gateUnknown = 'yes', 'no', 'unknown'
+        L.gateList = {
+            { id = 377637, name = 'Insatiable Blade', skill = 'Dancing Rune Weapon' },
+            { id = 458572, name = 'Bone Collector',   skill = 'Death Grip/Gorefiend\'s Grasp/Abomination Limb' },
+        }
         L.testHint = 'usage: /bdk bs test 1|2|3 (1=bone shield down 2=not enough stacks 3=expiring)'
     end
 end
@@ -817,6 +924,12 @@ driver:SetScript('OnUpdate', function()
 
     if not IsBlood() then SetFlash(false) return end
 
+    -- 0a. 天赋闸门缓存：只在非战斗时读（天赋不能在战斗中改，5 秒一次绰绰有余），
+    --     战斗中一律用缓存值 —— 见 GATES 那段的说明。
+    if not InCombatLockdown() and (not gateCacheAt or now - gateCacheAt >= 5) then
+        RefreshGates()
+    end
+
     -- 0. 持续型刷新窗口（目前只有憎恶之肢）：窗口内每秒都在拉怪 → 骨盾被一次次刷新，
     --    倒计时得跟着一路推迟，而不是只在施放那一拍重置一次。窗口长度由
     --    REFRESH_IDS 里那个技能自己的持续时间决定，这里只负责"窗口没走完就不许到点"。
@@ -897,15 +1010,24 @@ evt:SetScript('OnEvent', function(_, event, arg1, _, spellID)
         -- 重新计时：换地图/进本时 CDM 可能要重建帧池，别让上一条目的"最近扫到时间"
         -- 直接过期，否则刚进本就弹一次"未配置"的提示
         bsSeenAt, ossSeenAt = GetTime(), GetTime()
+        RefreshGates()
         StartDriver()
         ScanCdmFrames()
         UpdateCdmState()
         return
     end
 
+    -- 天赋/法术书变了：重读闸门缓存。RefreshGates 内部自会判断战斗状态。
+    if event == 'PLAYER_TALENT_UPDATE' or event == 'TRAIT_CONFIG_UPDATED'
+        or event == 'SPELLS_CHANGED' then
+        RefreshGates()
+        return
+    end
+
     if event == 'PLAYER_SPECIALIZATION_CHANGED' then
         if arg1 and arg1 ~= 'player' then return end
         if not IsBlood() then ClearWindow() HideText() end
+        RefreshGates()
         StartDriver()
         ScanCdmFrames()
         UpdateCdmState()
@@ -915,7 +1037,9 @@ evt:SetScript('OnEvent', function(_, event, arg1, _, spellID)
     if event == 'UNIT_SPELLCAST_SUCCEEDED' then
         if IsSecret(spellID) then return end
         local win = REFRESH_IDS[spellID]
-        if win and IsBlood() then
+        -- GateOpen：这个技能此刻算不算刷新源（取决于前置天赋有没有点）。
+        -- 没点对应天赋却当成刷新 → 倒计时被无谓重置 → 该提醒时不提醒，所以必须问。
+        if win and IsBlood() and GateOpen(spellID) then
             HideText()                -- 立即隐藏文字
             state.bsUp = true         -- 施放刷新技能即视为骨盾存在
             ResetWindow()             -- 启用/重置倒计时
@@ -1057,6 +1181,15 @@ local function PrintStatus()
         print(('  %s: %s (%.0fs ago)'):format(L.lastAlert,
             KindOf(state.lastAlertKind).reason,
             math.max(GetTime() - (state.lastAlertAt or GetTime()), 0)))
+    end
+    -- 天赋闸门：哪些"刷新技能"此刻真的算刷新源。
+    -- **这里也是验 ID 的地方** —— 明明点了天赋却显示"未点"或"读不到"，
+    -- 就是 GATES 里的 ID 写错了、或者该换一条检测 API。
+    for i = 1, #L.gateList do
+        local g = L.gateList[i]
+        local v = gateCache[g.id]
+        local s = (v == true and L.gateYes) or (v == false and L.gateNo) or L.gateUnknown
+        print(('  %s %s %d: %s → %s'):format(L.gateLabel, g.name, g.id, s, g.skill))
     end
 end
 

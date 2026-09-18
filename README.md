@@ -23,7 +23,9 @@ specs are left alone — the addon simply idles.
 - Each of the three alerts has its own line on screen — and on a Chinese client
   its own voice line too, so you can tell at a glance which one fired.
 - Casting Marrowrend, Death's Caress, Death Grip, Gorefiend's Grasp or Dancing Rune
-  Weapon clears the warning at once — you just refreshed it.
+  Weapon clears the warning at once — you just refreshed it. The last three only
+  count if you actually have the matching talent (Bone Collector), and Dancing Rune
+  Weapon needs Insatiable Blade — the addon checks this for you.
 - Triggers that land within 2 seconds of each other only make one sound.
 - If Bone Shield / Ossuary cannot be found in your Cooldown Manager, a yellow line
   stays on screen reminding you to drag them in.
@@ -98,6 +100,8 @@ World of Warcraft 正式服插件，供鲜血死亡骑士使用。
 - 三条提醒各有各的说法（中文客户端还各有各的语音），一眼/一耳就能分清是哪一条：
   「骨盾没了」「骨盾层数不够」「骨盾快没了」。
 - 施放骨髓打击、死神的抚摩、死亡之握、血魔之握、符文刃舞会立刻撤销提醒 —— 你已经补上了。
+  后三个只在点了**拾骨者**天赋时才算，符文刃舞还需要**不竭之刃**；插件会自己判断，
+  没点就不会冤枉地重置倒计时。
 - 2 秒内接连成立的几次触发只响一声，不重复吵。
 - 如果冷却管理器里找不到骨盾 / 埋骨之所，屏幕常驻一行黄字提醒你去把它们拖进去。
 - 文字和图标蒙版常开，语音可以关掉。

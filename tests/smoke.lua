@@ -95,6 +95,11 @@ env.__driver = driver
 env.__alertText = ENV.fonts[1]
 assert(env.__alertText, 'alert fontstring not found')
 
+-- 天赋闸门：默认按"标准流派该点的都点了"配置（不竭之刃 + 拾骨者），与真人玩家常态一致。
+-- 桩里 __talents 是空表，不设的话闸门全关 —— 所有拉怪 / 刃舞技能都会被判成"不刷新"。
+env.__talents[377637] = true   -- 不竭之刃 Insatiable Blade：符文刃舞给 5 层
+env.__talents[458572] = true   -- 拾骨者 Bone Collector：拉怪给 1 层
+
 env.SlashCmdList.BLOODDEATHKNIGHT('')                     -- 加载前不许崩
 evt.__scripts.OnEvent(evt, 'ADDON_LOADED', 'BloodDeathKnightHelper')
 env.__inCombat = true
@@ -267,9 +272,10 @@ check('窗口结束后 debug 不再显示刷新窗口',
 
 tick(20)                                    -- 再 10 秒，把提醒间隔拉远
 local th = timerLeft()
--- 符文刃舞 49028：技能自身描述不提骨盾，但 Crimson Rune Weapon 天赋让它
--- "generates 5 Bone Shield charges"（用户游戏内实测确认）。给 5 层 = 时长整体刷新，
+-- 符文刃舞 49028：技能自身描述不提骨盾，但天赋**不竭之刃**（Insatiable Blade, 377637）
+-- 让它 "generates 5 Bone Shield charges"（用户游戏内实测确认）。给 5 层 = 时长整体刷新，
 -- 所以它必须重置倒计时 —— 曾经因为它"描述里没写骨盾"被误删过一次，别再删。
+-- 同时它依赖该天赋 → 见下方 T5c 的闸门测试。
 cast(49028)
 local ti = timerLeft()
 check('符文刃舞 49028 会重置倒计时（天赋给 5 层骨盾）',
@@ -280,6 +286,79 @@ local tj = timerLeft()
 -- 若被误标成持续刷新窗口（>0），倒计时会被一路推迟 → 真到期时反而漏报。
 check('符文刃舞是瞬时型（窗口 0），3 秒后倒计时照常递减',
     ti and tj and tj < ti - 1.5, tostring(ti) .. ' -> ' .. tostring(tj))
+
+io.write('\n== T5c 前置天赋闸门 ==\n')
+-- 刷新技能到底产不产骨盾，取决于**前置天赋**有没有点：
+--   符文刃舞 ← 不竭之刃(377637)；死亡之握/血魔之握/憎恶之肢 ← 拾骨者(458572)。
+-- 没点却当成刷新 → 倒计时被无谓重置 → 该提醒时不提醒。
+-- 天赋是静态数据（只有非战斗时能改），所以代码非战斗时读一次缓存、战斗中只用缓存值，
+-- 这里就照这个节奏测。
+env.__inCombat = false
+bsItem.IsActive = true
+ossItem.IsActive = true
+tick(30)                                    -- 走完上段遗留的刷新窗口，顺手把倒计时降下来
+local g0 = timerLeft()
+check('闸门起手：骨盾在场、倒计时在走', g0 and g0 < 20, tostring(g0))
+
+-- (a) 关掉不竭之刃 → 符文刃舞不再算刷新源
+env.__talents[377637] = false
+evt.__scripts.OnEvent(evt, 'PLAYER_TALENT_UPDATE', 'player')  -- 天赋变了，立刻重读
+cast(49028)
+local g1 = timerLeft()
+check('没点不竭之刃时，符文刃舞不再重置倒计时', g0 and g1 and g1 <= g0 + 0.6,
+    tostring(g0) .. ' -> ' .. tostring(g1))
+
+env.__talents[377637] = true
+evt.__scripts.OnEvent(evt, 'PLAYER_TALENT_UPDATE', 'player')
+cast(49028)
+local g2 = timerLeft()
+check('点出不竭之刃后，符文刃舞照常重置倒计时', g1 and g2 and g2 > g1 + 8,
+    tostring(g1) .. ' -> ' .. tostring(g2))
+
+-- (b) 关掉拾骨者 → 两个拉怪技能都不再算刷新源
+env.__talents[458572] = false
+evt.__scripts.OnEvent(evt, 'PLAYER_TALENT_UPDATE', 'player')
+tick(20)
+local g3 = timerLeft()
+cast(49576)
+local g4 = timerLeft()
+check('没点拾骨者时，死亡之握不再重置倒计时', g3 and g4 and g4 <= g3 + 0.6,
+    tostring(g3) .. ' -> ' .. tostring(g4))
+cast(108199)
+local g5 = timerLeft()
+check('没点拾骨者时，血魔之握同样不重置', g4 and g5 and g5 <= g4 + 0.6,
+    tostring(g4) .. ' -> ' .. tostring(g5))
+
+-- (c) 闸门只管有前置天赋的技能：骨髓打击不受影响
+tick(20)
+local g6 = timerLeft()
+cast(195182)
+local g7 = timerLeft()
+check('骨髓打击没有前置天赋，闸门对它无效', g6 and g7 and g7 > g6 + 8,
+    tostring(g6) .. ' -> ' .. tostring(g7))
+
+-- (d) 检测 API 全不可用（12.x 战斗中被挡的情形）→ fail-open，不冤枉真会刷新的技能
+env.__noSpellKnownApi = true
+evt.__scripts.OnEvent(evt, 'PLAYER_TALENT_UPDATE', 'player')
+tick(30)
+local g8 = timerLeft()
+cast(49576)
+local g9 = timerLeft()
+check('天赋 API 读不到时 fail-open：死亡之握仍按刷新处理', g8 and g9 and g9 > g8 + 8,
+    tostring(g8) .. ' -> ' .. tostring(g9))
+
+env.__noSpellKnownApi = false
+env.__talents[377637], env.__talents[458572] = true, true
+evt.__scripts.OnEvent(evt, 'PLAYER_TALENT_UPDATE', 'player')
+env.__inCombat = true          -- 还原成战斗中（下面 T6 的"骨盾没了"判据要求战斗中）
+
+-- (e) debug 里能看到闸门状态 —— 也是**核对天赋 ID 的地方**：
+--     明明点了天赋却显示"未点/读不到"，就是 ID 写错了、或者该换检测 API
+local gd = cmd('debug')
+check('debug 打出不竭之刃闸门（带 ID，便于核对）',
+    gd:find('不竭之刃 377637: 已点', 1, true) ~= nil, gd)
+check('debug 打出拾骨者闸门（带 ID，便于核对）',
+    gd:find('拾骨者 458572: 已点', 1, true) ~= nil, gd)
 
 io.write('\n== T6 骨盾真正消失（战斗中） ==\n')
 resetSounds()

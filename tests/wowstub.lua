@@ -137,6 +137,18 @@ function ENV.install(lang)
     out.__inCombat       = false
     out.InCombatLockdown = function() return out.__inCombat == true end
 
+    -- 天赋闸门用的"玩家学了哪些法术"。__talents[spellID] = true 表示该天赋已点出。
+    -- __noSpellKnownApi = true 模拟**所有**检测 API 都不可用/被挡（12.x 战斗中的那种情形），
+    -- 用来验证代码走 fail-open 兜底而不是把技能误判成"不刷新"。
+    out.__talents        = {}
+    out.__noSpellKnownApi = false
+    out.C_SpellBook = {
+        IsSpellKnown = function(id)
+            if out.__noSpellKnownApi then error('blocked in combat') end
+            return out.__talents[id] == true
+        end,
+    }
+
     out.UnitClass = function() return 'Blood Death Knight', 'DEATHKNIGHT', 6 end
     out.C_SpecializationInfo = {
         GetSpecialization = function() return out.__spec or 1 end,
