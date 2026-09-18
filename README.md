@@ -15,15 +15,15 @@ specs are left alone — the addon simply idles.
 **Bone Shield / Ossuary reminder**
 
 - When Bone Shield appears, a 30-second countdown starts. With about 5 seconds
-  left you get a voice callout, the text **Bone Shield!** across the upper part of
-  the screen, and a pulsing red mask over the Bone Shield icon in your Cooldown
-  Manager.
+  left you get a voice callout, the text **Bone Shield expiring!** across the upper
+  part of the screen, and a pulsing red mask over the Bone Shield icon in your
+  Cooldown Manager.
 - It also calls out when Bone Shield actually falls off, and when **Ossuary**
   (Bone Shield at 5+ stacks) drops.
 - Each of the three alerts has its own line on screen — and on a Chinese client
   its own voice line too, so you can tell at a glance which one fired.
-- Casting Marrowrend, Death's Caress, Gorefiend's Grasp or Dancing Rune Weapon
-  clears the warning at once — you just refreshed it.
+- Casting Marrowrend, Death's Caress, Death Grip, Gorefiend's Grasp or Dancing Rune
+  Weapon clears the warning at once — you just refreshed it.
 - Triggers that land within 2 seconds of each other only make one sound.
 - If Bone Shield / Ossuary cannot be found in your Cooldown Manager, a yellow line
   stays on screen reminding you to drag them in.
@@ -97,7 +97,7 @@ World of Warcraft 正式服插件，供鲜血死亡骑士使用。
 - 骨盾真的掉了、或者 **埋骨之所**（骨盾 ≥ 5 层）消失时，同样提醒一次。
 - 三条提醒各有各的说法（中文客户端还各有各的语音），一眼/一耳就能分清是哪一条：
   「骨盾没了」「骨盾层数不够」「骨盾快没了」。
-- 施放骨髓打击、死亡之攫、腐烂之握、符文武器幻舞会立刻撤销提醒 —— 你已经补上了。
+- 施放骨髓打击、死神的抚摩、死亡之握、血魔之握、符文刃舞会立刻撤销提醒 —— 你已经补上了。
 - 2 秒内接连成立的几次触发只响一声，不重复吵。
 - 如果冷却管理器里找不到骨盾 / 埋骨之所，屏幕常驻一行黄字提醒你去把它们拖进去。
 - 文字和图标蒙版常开，语音可以关掉。

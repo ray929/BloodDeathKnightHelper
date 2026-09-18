@@ -216,7 +216,7 @@ check('施放后蒙版清除（alpha 归零）', ov and ov.__alpha == 0, ov and 
 check('施放后蒙版停止脉动', ov and ov.__scripts.OnUpdate == nil)
 check('施放后不再重复播报', env.__sounds and #env.__sounds == 0, #env.__sounds)
 
-io.write('\n== T5b 刷新技能白名单（死亡之握 / 血魔之握 / 憎恶之肢 / 幻舞） ==\n')
+io.write('\n== T5b 刷新技能白名单（死亡之握 / 血魔之握 / 憎恶之肢 / 符文刃舞） ==\n')
 -- 从 /bdk debug 里取 "timer: XX.Xs left" 的剩余秒数
 local function timerLeft()
     local n = cmd('debug'):match('timer: ([%d%.]+)s left')
@@ -267,12 +267,19 @@ check('窗口结束后 debug 不再显示刷新窗口',
 
 tick(20)                                    -- 再 10 秒，把提醒间隔拉远
 local th = timerLeft()
--- 符文武器幻舞 12.x 只 mirror melee attacks + 加招架，**不产骨盾**：
--- 它要是还留在白名单里，倒计时会被无谓重置 = 漏报（比漏检更糟）。
+-- 符文刃舞 49028：技能自身描述不提骨盾，但 Crimson Rune Weapon 天赋让它
+-- "generates 5 Bone Shield charges"（用户游戏内实测确认）。给 5 层 = 时长整体刷新，
+-- 所以它必须重置倒计时 —— 曾经因为它"描述里没写骨盾"被误删过一次，别再删。
 cast(49028)
 local ti = timerLeft()
-check('符文武器幻舞 49028 不再重置倒计时（它不产骨盾）',
-    th and ti and ti <= th + 0.6, tostring(th) .. ' -> ' .. tostring(ti))
+check('符文刃舞 49028 会重置倒计时（天赋给 5 层骨盾）',
+    th and ti and ti > th + 8, tostring(th) .. ' -> ' .. tostring(ti))
+tick(6)                                     -- 3 秒
+local tj = timerLeft()
+-- 它是**瞬时型**（值 0）：只重置一次，之后照常递减。
+-- 若被误标成持续刷新窗口（>0），倒计时会被一路推迟 → 真到期时反而漏报。
+check('符文刃舞是瞬时型（窗口 0），3 秒后倒计时照常递减',
+    ti and tj and tj < ti - 1.5, tostring(ti) .. ' -> ' .. tostring(tj))
 
 io.write('\n== T6 骨盾真正消失（战斗中） ==\n')
 resetSounds()

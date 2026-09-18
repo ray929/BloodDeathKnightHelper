@@ -63,22 +63,25 @@ local ABSENT_GRACE = 3        -- CDM 条目"持续"扫不到多久才算没配�
 --   0  → 瞬时型：施放那一刻刷新一次
 --   >0 → 持续型：该技能在 N 秒里反复拉怪，骨盾被一次次刷新，倒计时得一路跟着推迟
 --
--- 依据（12.1，逐条在 warcraft.wiki.gg 核实过，别凭印象往里加）：
---   195182  Marrowrend          骨髓打击 —— 骨盾的主来源（Bone Shield 页明写）
---   195292  Death's Caress      —— 技能描述 "generating 2 Bone Shield charges"
---   49576   Death Grip          死亡之握 ┐ 拾骨者天赋（Bone Collector, 458572）：
+-- 依据（12.1，逐条在 warcraft.wiki.gg 核实 + 游戏内实测，别凭印象往里加/删）：
+--   195182  Marrowrend           骨髓打击 —— 骨盾的主来源（Bone Shield 页明写）
+--   195292  Death's Caress       死神的抚摩 —— 描述 "generating 2 Bone Shield charges"
+--   49028   Dancing Rune Weapon  符文刃舞 —— 给 5 层。⚠️ 技能自身描述**不提骨盾**
+--                              （12.1 只有 "mirrors your melee attacks" + 30% 招架），
+--                              给层数来自 **Crimson Rune Weapon** 天赋："Dancing Rune
+--                              Weapon generates 5 Bone Shield charges"。用户 2026-09-18
+--                              游戏内实测确认（DRW 后骨盾刷回 30 秒 / 5 层）。
+--                              只看技能描述就会以为它不产骨盾 —— 我们因此误删过一次。
+--   49576   Death Grip           死亡之握 ┐ 拾骨者天赋（Bone Collector, 458572）：
 --   108199  Gorefiend's Grasp   血魔之握 ┘ "When you would pull an enemy generate
 --   1263569 Abomination Limb    憎恶之肢   1 charge of Bone Shield"，Affects 正是前两个；
 --                                        憎恶之肢由 12.0.0 重做而来，2026-03-06 的 hotfix
 --                                        专门修过"点拾骨者时它不给骨盾"的问题。
--- ⚠️ 曾经误收两个，已删，别再捡回来：
---   49028 符文武器幻舞 —— 12.x 的描述只有 "mirrors your melee attacks" + 30% 招架，
---                        **不产骨盾**。留在表里会让倒计时被无谓重置 = 漏报，
---                        而这比漏检更糟（该提醒的时候不提醒）。
---   439843 —— 查无此技能（wiki 搜索零命中），当初就是猜的，删。
+-- 另：439843 查无此技能（wiki 搜索零命中），当初就是猜的，已删，别再捡回来。
 local REFRESH_IDS = {
     [195182]  = 0,   -- Marrowrend 骨髓打击
-    [195292]  = 0,   -- Death's Caress（给 2 层）
+    [195292]  = 0,   -- Death's Caress 死神的抚摩（给 2 层）
+    [49028]   = 0,   -- Dancing Rune Weapon 符文刃舞（天赋给 5 层，见上）
     [49576]   = 0,   -- Death Grip 死亡之握
     [108199]  = 0,   -- Gorefiend's Grasp 血魔之握
     [1263569] = 12,  -- Abomination Limb 憎恶之肢：持续 12 秒、每秒拉一次
