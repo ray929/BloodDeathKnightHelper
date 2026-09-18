@@ -38,9 +38,10 @@ local function cmd(m)
 end
 local function sounds() return #env.__sounds end
 local function resetSounds() env.__sounds = {} end
--- 语音分两种：'voice-cn.mp3' = 提前预警（倒计时到点）、'voice-cn-1.mp3' = 已经没了
--- （骨盾掉了 / 埋骨之所掉了）。文件名的包含关系是"前缀"关系但不会互相误命中：
--- 'voice-cn.mp3' 不是 'voice-cn-1.mp3' 的子串。
+-- 语音分三条，与三条判据一一对应（听声音就知道是哪条在响）：
+--   voice-cn-1 = 骨盾没了 / voice-cn-2 = 骨盾层数不够 / voice-cn-3 = 骨盾快没了（倒计时到点）
+-- 文件名互不为子串，按名字查找不会互相误命中。
+-- 注：旧的共用文件 voice-cn.mp3 已退役 —— 下面的断言里它一次都不许出现。
 local function soundUsed(sub)
     for i = 1, #env.__sounds do
         if env.__sounds[i]:find(sub, 1, true) then return true end
@@ -120,10 +121,12 @@ tick(45)                                   -- 累计 23.5s < WARN_AFTER(24s)：�
 check('到点前不提醒', sounds() == 0, sounds())
 tick(4)                                    -- 累计 25.5s：越过 WARN_AFTER
 check('到点响了语音', sounds() == 1, sounds())
-check('到点用的是「提前预警」语音 voice-cn.mp3',
-    soundUsed('voice-cn.mp3') and not soundUsed('voice-cn-1.mp3'),
+check('到点用的是第 3 条 voice-cn-3.mp3（骨盾快没了）',
+    soundUsed('voice-cn-3.mp3') and not soundUsed('voice-cn-1.mp3')
+        and not soundUsed('voice-cn-2.mp3') and not soundUsed('voice-cn.mp3'),
     table.concat(env.__sounds, ' '))
-check('到点显示了提醒文字', env.__alertText:GetText() == '补骨盾', env.__alertText:GetText())
+check('到点显示的红字是「骨盾快没了」',
+    env.__alertText:GetText() == '骨盾快没了', env.__alertText:GetText())
 
 local ov
 for i = 1, #bsItem.__kids do
@@ -218,9 +221,12 @@ resetSounds()
 bsItem.IsActive = false
 tick(5)                                    -- 2.5s > DOWN_GRACE
 check('连续消失后触发一次提醒', sounds() == 1, sounds())
-check('骨盾掉了用的是「已经没了」语音 voice-cn-1.mp3',
-    soundUsed('voice-cn-1.mp3') and not soundUsed('voice-cn.mp3'),
+check('骨盾掉了用的是第 1 条 voice-cn-1.mp3',
+    soundUsed('voice-cn-1.mp3') and not soundUsed('voice-cn-2.mp3')
+        and not soundUsed('voice-cn-3.mp3'),
     table.concat(env.__sounds, ' '))
+check('骨盾掉了显示的红字是「骨盾没了」',
+    env.__alertText:GetText() == '骨盾没了', env.__alertText:GetText())
 check('倒计时已清空', cmd('debug'):find('timer: idle', 1, true) ~= nil)
 
 io.write('\n== T7 非战斗消失 → 静默 ==\n')
@@ -264,9 +270,10 @@ check('角色标签区分主 ID 与关联 ID', dd:find('ids=spell=219786 linked=
 env.__inCombat = true
 
 io.write('\n== T11 同一窗口内的重复提醒 ==\n')
--- 倒计时到点 / 骨盾掉了 / 埋骨之所掉了 三条判据打出来的是**同一句话**（同一行红字、
--- 同一段语音），而它们完全可能在同一拍或半秒内接连成立。下面三种对齐是刻意构造的：
--- 让"骨盾读到不在场"的起始时刻落在倒计时到点前 1.0 秒 / 0.5 秒。
+-- 倒计时到点 / 骨盾掉了 / 埋骨之所掉了 三条判据各有自己的红字与语音，而它们完全可能在
+-- 同一拍或半秒内接连成立。规则是：2 秒内只发一次声（ALERT_GAP），但**红字不吞** ——
+-- 会换成最新那条判据的文案（"快没了" → "没了" 本身是升级信息）。下面三种对齐是刻意
+-- 构造的：让"骨盾读到不在场"的起始时刻落在倒计时到点前 1.0 秒 / 0.5 秒。
 local function armWindow()
     -- 重新摆成"骨盾在场"，跑一拍让状态机认到 → 开一个新窗口（timerEnd = 现在 + 24）
     ossItem.IsActive = true
@@ -309,7 +316,10 @@ tick(1)                         -- 到点：响第一次
 check('到点响了', sounds() == 1, sounds())
 tick(1)                         -- 到点后 0.5s：去抖成立
 check('半秒内不重复响', sounds() == 1, sounds())
--- 去重只吞声音，视觉必须留着：掉盾那条路已经 ClearWindow() 撤过一次红字和蒙版
+-- 去重只吞声音：红字要换成最新那条判据的话（这里是"骨盾没了"），蒙版也得留着 ——
+-- 掉盾那条路已经 ClearWindow() 撤过一次红字和蒙版。
+check('去重后红字换成最新那条「骨盾没了」',
+    env.__alertText:GetText() == '骨盾没了', env.__alertText:GetText())
 local af = findFrame('BloodDeathKnightAlert')
 check('去重后红字仍在屏幕上', af and af.__shown == true)
 local mask = bsOverlay()
@@ -323,21 +333,24 @@ tick(12)                        -- 再撑 6 秒（骨盾真正的到期时刻）
 bsItem.IsActive = false
 tick(4)                         -- 2s：去抖成立
 check('骨盾随后真的消失，再报一次（不被去重吞掉）', sounds() == 2, sounds())
-check('后一声是「已经没了」那条语音',
+check('后一声是第 1 条「骨盾没了」voice-cn-1.mp3',
     env.__sounds[2] ~= nil and env.__sounds[2]:find('voice-cn-1.mp3', 1, true) ~= nil,
     tostring(env.__sounds[2]))
 
--- (d) 埋骨之所先掉、骨盾随后也掉：先后两条判据，打的是同一句话
+-- (d) 埋骨之所先掉、骨盾随后也掉：两条判据各有各的话，但 2 秒内只发一次声
 armWindow()
 tick(1)
 ossItem.IsActive = false
 tick(3)                         -- 1.5s：埋骨之所去抖成立，响一次
 check('埋骨之所掉了报一次', sounds() == 1, sounds())
-check('埋骨之所掉了用「已经没了」语音',
-    soundUsed('voice-cn-1.mp3'), table.concat(env.__sounds, ' '))
+check('埋骨之所掉了用的是第 2 条 voice-cn-2.mp3',
+    soundUsed('voice-cn-2.mp3') and not soundUsed('voice-cn-1.mp3'),
+    table.concat(env.__sounds, ' '))
+check('埋骨之所掉了显示的红字是「骨盾层数不够」',
+    env.__alertText:GetText() == '骨盾层数不够', env.__alertText:GetText())
 bsItem.IsActive = false
 tick(3)                         -- 1.5s：骨盾也掉了
-check('骨盾随后也掉，同一句话不重复响', sounds() == 1, sounds())
+check('骨盾随后也掉，2 秒内不重复响', sounds() == 1, sounds())
 
 io.write('\n== T12 命令表：/bdk 帮助排版 ==\n')
 local help = cmd('')
@@ -381,16 +394,30 @@ resetSounds()
 local t = cmd('bs test')
 check('bs test 认领并打出自检行', t:find('test: shown=', 1, true) ~= nil, t)
 check('bs test 会出声', sounds() == 1, sounds())
-check('bs test 打的是「提前预警」那条语音', t:find('voice-cn.mp3', 1, true) ~= nil
-    and soundUsed('voice-cn.mp3'), t)
-check('bs test 顺手提示怎么试听另一条', t:find('bs test 2', 1, true) ~= nil, t)
+check('bs test 不带参数 = 第 1 条「骨盾没了」(voice-cn-1.mp3)',
+    t:find('voice 1/3', 1, true) ~= nil and t:find('voice-cn-1.mp3', 1, true) ~= nil
+        and soundUsed('voice-cn-1.mp3'), t)
+check('bs test 的红字是「骨盾没了」',
+    env.__alertText:GetText() == '骨盾没了', env.__alertText:GetText())
+check('bs test 顺手列出三条的编号', t:find('bs test 1|2|3', 1, true) ~= nil, t)
 
 resetSounds()
 local t2v = cmd('bs test 2')
-check('bs test 2 试听「已经没了」那条语音',
-    t2v:find('voice-cn-1.mp3', 1, true) ~= nil and soundUsed('voice-cn-1.mp3')
-        and not soundUsed('voice-cn.mp3'), t2v .. ' | ' .. table.concat(env.__sounds, ' '))
-check('试听也顺手提示另一条', t2v:find('bs test', 1, true) ~= nil, t2v)
+check('bs test 2 = 第 2 条「骨盾层数不够」(voice-cn-2.mp3)',
+    t2v:find('voice 2/3', 1, true) ~= nil and t2v:find('voice-cn-2.mp3', 1, true) ~= nil
+        and soundUsed('voice-cn-2.mp3') and not soundUsed('voice-cn-1.mp3'),
+    t2v .. ' | ' .. table.concat(env.__sounds, ' '))
+check('bs test 2 的红字是「骨盾层数不够」',
+    env.__alertText:GetText() == '骨盾层数不够', env.__alertText:GetText())
+
+resetSounds()
+local t3v = cmd('bs test 3')
+check('bs test 3 = 第 3 条「骨盾快没了」(voice-cn-3.mp3)',
+    t3v:find('voice 3/3', 1, true) ~= nil and t3v:find('voice-cn-3.mp3', 1, true) ~= nil
+        and soundUsed('voice-cn-3.mp3') and not soundUsed('voice-cn-2.mp3'),
+    t3v .. ' | ' .. table.concat(env.__sounds, ' '))
+check('bs test 3 的红字是「骨盾快没了」',
+    env.__alertText:GetText() == '骨盾快没了', env.__alertText:GetText())
 
 resetSounds()
 cmd('bs sound off')

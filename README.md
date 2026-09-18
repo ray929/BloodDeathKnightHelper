@@ -20,6 +20,8 @@ specs are left alone — the addon simply idles.
   Manager.
 - It also calls out when Bone Shield actually falls off, and when **Ossuary**
   (Bone Shield at 5+ stacks) drops.
+- Each of the three alerts has its own line on screen — and on a Chinese client
+  its own voice line too, so you can tell at a glance which one fired.
 - Casting Marrowrend, Death's Caress, Gorefiend's Grasp or Dancing Rune Weapon
   clears the warning at once — you just refreshed it.
 - Triggers that land within 2 seconds of each other only make one sound.
@@ -57,7 +59,7 @@ Type `/bdk` on its own to print the list in game.
 | Command | What it does |
 |---|---|
 | `/bdk` | Show the command list |
-| `/bdk bs test` | Play the Bone Shield alert once (text + voice + icon mask) so you can check your setup |
+| `/bdk bs test [1\|2\|3]` | Play one alert (text + voice + icon mask): 1 bone shield down, 2 not enough stacks, 3 expiring — so you can check your setup |
 | `/bdk bs sound` | Toggle the Bone Shield voice on / off |
 | `/bdk bs sound on\|off` | Turn the voice on / off explicitly |
 | `/bdk bp test` | Show the Blood Boil bar for previewing — right-drag to move it, run it again to finish |
@@ -93,6 +95,8 @@ World of Warcraft 正式服插件，供鲜血死亡骑士使用。
 - 骨盾出现即开始 30 秒倒计时。约剩 5 秒时，语音提示、屏幕上方的红字
   **补骨盾**、以及冷却管理器里骨盾图标的红色脉冲蒙版一起出现。
 - 骨盾真的掉了、或者 **埋骨之所**（骨盾 ≥ 5 层）消失时，同样提醒一次。
+- 三条提醒各有各的说法（中文客户端还各有各的语音），一眼/一耳就能分清是哪一条：
+  「骨盾没了」「骨盾层数不够」「骨盾快没了」。
 - 施放骨髓打击、死亡之攫、腐烂之握、符文武器幻舞会立刻撤销提醒 —— 你已经补上了。
 - 2 秒内接连成立的几次触发只响一声，不重复吵。
 - 如果冷却管理器里找不到骨盾 / 埋骨之所，屏幕常驻一行黄字提醒你去把它们拖进去。
@@ -124,7 +128,7 @@ World of Warcraft 正式服插件，供鲜血死亡骑士使用。
 | 命令 | 作用 |
 |---|---|
 | `/bdk` | 显示命令列表 |
-| `/bdk bs test` | 完整播放一次骨盾提醒（红字 + 语音 + 图标蒙版），用来检查配置 |
+| `/bdk bs test [1\|2\|3]` | 试听某一条提醒（红字 + 语音 + 图标蒙版）：1 骨盾没了、2 骨盾层数不够、3 骨盾快没了，用来检查配置 |
 | `/bdk bs sound` | 切换骨盾语音开关 |
 | `/bdk bs sound on\|off` | 明确打开 / 关闭语音 |
 | `/bdk bp test` | 显示血沸条以便预览 —— 右键拖动定位，再执行一次结束 |

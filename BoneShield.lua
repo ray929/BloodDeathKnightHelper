@@ -6,10 +6,14 @@
 --   1. 骨盾出现时启动倒计时（骨盾固定持续 30 秒），约剩 5 秒时语音+文字 3 秒提醒一次，
 --      同时给 CDM 里的骨盾图标盖上脉冲红蒙版（视觉提醒，直到补盾或窗口重置）；
 --   2. 埋骨之所（Ossuary，骨盾 >= 5 层增益）消失时语音+文字 3 秒提醒一次；
---   3. 施放任意会产生/刷新骨盾的技能时，立即隐藏文字、撤掉蒙版并重置倒计时；
---   4. 骨盾彻底消失时停止一切提醒。
---   5. 三条判据打出来的是同一句话，所以 2 秒内只发一次声（ALERT_GAP）——
---      它们可能在同一拍或半秒内接连成立，重复发声纯属噪音；视觉照旧维持。
+--   3. 骨盾彻底消失时停止一切提醒。
+--   4. 施放任意会产生/刷新骨盾的技能时，立即隐藏文字、撤掉蒙版并重置倒计时；
+--   5. 三条判据各有自己的红字文案与语音（见 L.kinds，/bdk bs test 1|2|3 可逐条试听）：
+--        bsGone  骨盾没了      ← voice-cn-1.mp3
+--        ossGone 骨盾层数不够  ← voice-cn-2.mp3
+--        warn    骨盾快没了    ← voice-cn-3.mp3（倒计时到点，提前预警）
+--      英文三条共用 voice-en.mp3。它们可能在同一拍或半秒内接连成立，所以 2 秒内只发
+--      一次声（ALERT_GAP）——重复发声纯属噪音，但**文字不吞**，会换成最新那条判据的话。
 --
 -- 前提条件：玩家需把「骨盾」和「埋骨之所」拖入暴雪冷却管理器（CDM）。
 -- 若持续检测不到对应 CDM 条目，屏幕 1/3 处常驻提示文字，指导玩家配置。
@@ -40,10 +44,11 @@ local BONE_SHIELD_TIME = 30   -- 骨盾固定持续时间（秒）
 local WARN_LEAD    = 6
 local WARN_AFTER   = BONE_SHIELD_TIME - WARN_LEAD   -- = 24，倒计时长度
 local TEXT_DURATION = 3       -- 提醒文字显示时长
--- 三条判据（倒计时到点 / 骨盾掉了 / 埋骨之所掉了）触发的是**同一句话** —— 同一行红字、
--- 同一段语音。它们完全可能在同一拍或半秒内接连成立：最典型的是倒计时到点的那一拍，
--- 恰好"骨盾读到不在场"也刚满 1 秒去抖（掉盾起始点落在到点前 1.0s → 同一拍；
--- 落在到点前 0.5s → 半秒后）。这时再响一遍纯属噪音，所以给"真的发声"加一个最小间隔。
+-- 三条判据（倒计时到点 / 骨盾掉了 / 埋骨之所掉了）各有自己的文案与语音，但它们完全可能
+-- 在同一拍或半秒内接连成立：最典型的是倒计时到点的那一拍，恰好"骨盾读到不在场"也刚满
+-- 1 秒去抖（掉盾起始点落在到点前 1.0s → 同一拍；落在到点前 0.5s → 半秒后）。
+-- 半秒内连播两句话纯属噪音，所以给"真的发声"加一个最小间隔；**但文字不吞** ——
+-- 走这条分支时会把红字换成最新那条判据的文案（"快没了" → "没了" 本身就是升级信息）。
 -- 注意这个间隔要**大于**上面那个 0.5s 的对齐窗口、又必须**小于**骨盾真到期时的间隔
 -- （到点提醒 → 6 秒后真掉盾 → 再报），否则会把"骨盾真的没了"那一声误吞。2 秒两头都安全。
 local ALERT_GAP    = 2.0
@@ -80,7 +85,6 @@ local function ApplyLang()
     local zh = (LOCALE:sub(1, 2) == 'zh')
 
     if zh then
-        L.alertText = '补骨盾'
         L.setupText = '请将「骨盾」和「埋骨之所」拖入冷却管理器 (CDM)'
         L.tag = '|cff71d5ff[鲜血死亡骑士]|r'
         L.on, L.off = '开', '关'
@@ -94,15 +98,17 @@ local function ApplyLang()
         L.cdmFound, L.cdmMiss = '已监控', '缺失'
         L.cdmUnproven = '（从未激活过）'
         L.flashIdle = '未在提醒窗口'
-        -- 语音分两种（听声音就知道是哪条判据在响）：倒计时到点的"提前预警"、已经掉了的"补盾"。
-        L.voiceWarn = 'voice-cn.mp3'
-        L.voiceGone = 'voice-cn-1.mp3'
-        L.reasonWarn, L.reasonGone = '提前预警（倒计时到点）', '已经没了（掉了）'
+        -- 三条判据各有自己的**红字 + 语音**（看字、听声都能分辨是哪条在响）。
+        -- 中文三条音文件互相独立；kindOrder 的顺序就是 /bdk bs test 1|2|3 的编号。
+        L.kinds = {
+            bsGone  = { text = '骨盾没了',     voice = 'voice-cn-1.mp3', reason = '骨盾没了（掉了）' },
+            ossGone = { text = '骨盾层数不够', voice = 'voice-cn-2.mp3', reason = '埋骨之所没了（层数不够）' },
+            warn    = { text = '骨盾快没了',   voice = 'voice-cn-3.mp3', reason = '倒计时到点（提前预警）' },
+        }
+        L.kindOrder = { 'bsGone', 'ossGone', 'warn' }
         L.lastAlert = '上次提醒'
-        L.testHintWarn = '试试另一条（已经没了）：/bdk bs test 2'
-        L.testHintGone = '试试另一条（提前预警）：/bdk bs test'
+        L.testHint = '用法：/bdk bs test 1|2|3（1=骨盾没了 2=骨盾层数不够 3=骨盾快没了）'
     else
-        L.alertText = 'Bone Shield!'
         L.setupText = 'Drag "Bone Shield" and "Ossuary" into the Cooldown Manager (CDM)'
         L.tag = '|cff71d5ff[BloodDeathKnight]|r'
         L.on, L.off = 'on', 'off'
@@ -116,14 +122,24 @@ local function ApplyLang()
         L.cdmFound, L.cdmMiss = 'tracked', 'missing'
         L.cdmUnproven = ' (never lit)'
         L.flashIdle = 'no warning window'
-        -- 英文只有一条语音（用户要求），两种触发共用。
-        L.voiceWarn = 'voice-en.mp3'
-        L.voiceGone = 'voice-en.mp3'
-        L.reasonWarn, L.reasonGone = 'early warning (timer)', 'already gone'
+        -- 英文只有一条语音（用户要求），三条判据共用；文案照样三条。
+        L.kinds = {
+            bsGone  = { text = 'Bone Shield down!',     voice = 'voice-en.mp3', reason = 'bone shield down' },
+            ossGone = { text = 'Not enough stacks!',    voice = 'voice-en.mp3', reason = 'ossuary gone (not enough stacks)' },
+            warn    = { text = 'Bone Shield expiring!', voice = 'voice-en.mp3', reason = 'early warning (timer)' },
+        }
+        L.kindOrder = { 'bsGone', 'ossGone', 'warn' }
         L.lastAlert = 'last alert'
-        L.testHintWarn = 'try the other one (already gone): /bdk bs test 2'
-        L.testHintGone = 'try the other one (early warning): /bdk bs test'
+        L.testHint = 'usage: /bdk bs test 1|2|3 (1=bone shield down 2=not enough stacks 3=expiring)'
     end
+end
+
+-- 判据 → {text, voice, reason}。kind 只有三种（L.kindOrder 里的那些）；
+-- 传了不认识的值就退到 warn，绝不让 nil 索引把插件打崩。
+local function KindOf(kind)
+    local set = L.kinds
+    if not set then return { text = '', voice = 'voice-en.mp3', reason = '?' } end
+    return set[kind] or set.warn
 end
 
 ---------------------------------------------------------------- 设置
@@ -499,14 +515,12 @@ local function PositionAlert()
     alertFrame:SetPoint('CENTER', UIParent, 'TOP', 0, -h / 3)
 end
 
--- 语音分两条，听声音就能分出是哪一类判据在响（排查误报时最省事的一招）：
---   'warn' —— 倒计时到点，提前预警；
---   'gone' —— 已经没了（骨盾掉了 / 埋骨之所掉了）。
--- 文件名走 L.voice*（中文两个文件，英文一个）。
+-- 语音按判据分条，听声音就能分出是哪一类在响（排查误报时最省事的一招）：
+--   'bsGone'  骨盾没了     /  'ossGone' 骨盾层数不够  /  'warn' 骨盾快没了（倒计时到点）。
+-- 文件名走 L.kinds[kind].voice —— 中文三条互不相同，英文三条共用 voice-en.mp3。
 local function PlayVoice(kind)
     if not DB or not DB.sound then return end
-    local file = (kind == 'gone') and L.voiceGone or L.voiceWarn
-    local path = ('Interface\\AddOns\\%s\\Sounds\\%s'):format(ADDON_NAME, file)
+    local path = ('Interface\\AddOns\\%s\\Sounds\\%s'):format(ADDON_NAME, KindOf(kind).voice)
     pcall(PlaySoundFile, path, 'Master')
 end
 
@@ -517,12 +531,13 @@ local function HideText()
     alertFrame:SetScript('OnUpdate', nil)
 end
 
-local function ShowText()
+-- 红字文案按判据取（kind 决定写哪一句，见 L.kinds）
+local function ShowText(kind)
     if not DB.text then return end
     state.showingSetup = false
     state.hideAt = GetTime() + TEXT_DURATION
     PositionAlert()
-    alertText:SetText(L.alertText)
+    alertText:SetText(KindOf(kind).text)
     alertText:SetTextColor(1, 0.15, 0.15)
     alertText:SetAlpha(0.75)
     alertFrame:Show()
@@ -647,25 +662,27 @@ local function SetFlash(on)
 end
 
 ---------------------------------------------------------------- 状态机
--- kind: 'warn' = 倒计时到点（提前预警）；'gone' = 已经没了。只有语音不同，文字是同一句。
+-- kind: 'bsGone' = 骨盾没了 / 'ossGone' = 骨盾层数不够 / 'warn' = 骨盾快没了（倒计时到点）。
+-- 三个 kind 各自带红字文案与语音（L.kinds），调用点见本文件三处 TriggerAlert。
 local function TriggerAlert(kind)
     if state.alerted then return end
     if state.suppressAlertsUntil and GetTime() < state.suppressAlertsUntil then return end
     local now = GetTime()
-    -- 刚响过：这次是同一个窗口里另一条判据紧接着成立，消息一模一样，只吞掉声音。
-    -- 但视觉必须补回来 —— 走到这里之前，掉盾那条路已经 ClearWindow() 把红字和蒙版
-    -- 撤掉了；不补的话，玩家刚听到一声"补骨盾"，字和蒙版却同时消失了。
+    -- 刚响过：这次是同一个窗口里另一条判据紧接着成立。半秒内连播两句话纯属噪音，
+    -- 所以只吞声音；**文字要换成新判据那一句**（"快没了" → "没了" 是升级信息），
+    -- 蒙版也一样 —— 走到这里之前，掉盾那条路已经 ClearWindow() 把红字和蒙版撤掉了；
+    -- 不补的话，玩家刚听到一声"骨盾没了"，字和蒙版却同时消失了。
     -- 另外要把窗口标记成"已提醒"：否则下一拍这条判据又会来一次，变成 2 秒后补一枪。
     if state.lastAlertAt and now - state.lastAlertAt < ALERT_GAP then
         state.alerted = true
-        ShowText()
+        ShowText(kind)
         SetFlash(true)
         return
     end
     state.alerted = true
     state.lastAlertAt = now
     state.lastAlertKind = kind        -- 诊断用：哪一类判据真的发了声
-    ShowText()
+    ShowText(kind)
     PlayVoice(kind)
     -- 蒙版跟着窗口走，而不是跟着那 3 秒文字走：文字收了图标还在闪，直到补盾为止
     SetFlash(true)
@@ -736,7 +753,7 @@ local function UpdateCdmState()
                 -- 非战斗中静默（脱战前后掉盾属常态，不打扰）
                 local inCombat = InCombatLockdown()
                 ClearWindow()   -- 先清理（alerted 复位），保证此次提醒能触发
-                if inCombat then TriggerAlert('gone') end
+                if inCombat then TriggerAlert('bsGone') end
                 return
             end
         end
@@ -753,8 +770,8 @@ local function UpdateCdmState()
         state.ossDownSince = state.ossDownSince or now
         if now - state.ossDownSince >= DOWN_GRACE then
             state.ossUp = false
-            -- 埋骨之所消失且骨盾仍在：触发提醒
-            if state.bsUp then TriggerAlert('gone') end
+            -- 埋骨之所消失且骨盾仍在：触发提醒（骨盾在 = 只是层数掉到 5 层以下）
+            if state.bsUp then TriggerAlert('ossGone') end
         end
     end
 end
@@ -994,20 +1011,20 @@ local function PrintStatus()
     -- 上次提醒是哪一类：听声音之外，这里也能回头看（排查误报时最想知道的一条）
     if state.lastAlertKind then
         print(('  %s: %s (%.0fs ago)'):format(L.lastAlert,
-            state.lastAlertKind == 'warn' and L.reasonWarn or L.reasonGone,
+            KindOf(state.lastAlertKind).reason,
             math.max(GetTime() - (state.lastAlertAt or GetTime()), 0)))
     end
 end
 
--- /bdk bs test [2]：不带参数 = 提前预警那条语音；带 2 = 已经没了那条。
-local function Test(kind)
-    kind = (kind == '2') and 'gone' or 'warn'
-    print(L.tag, ('voice: %s = %s'):format(
-        kind == 'gone' and L.reasonGone or L.reasonWarn,
-        kind == 'gone' and L.voiceGone or L.voiceWarn))
-    if kind == 'warn' then print(L.tag, '  ' .. L.testHintWarn)
-    else print(L.tag, '  ' .. L.testHintGone) end
-    ShowText()
+-- /bdk bs test [1|2|3]：1 = 骨盾没了（默认）、2 = 骨盾层数不够、3 = 骨盾快没了（提前预警）。
+local function Test(arg)
+    local kind = (arg == '2' and 'ossGone') or (arg == '3' and 'warn') or 'bsGone'
+    local idx = 1
+    for i = 1, #L.kindOrder do if L.kindOrder[i] == kind then idx = i end end
+    local k = KindOf(kind)
+    print(L.tag, ('voice %d/3: %s = %s'):format(idx, k.text, k.voice))
+    print(L.tag, '  ' .. L.testHint)
+    ShowText(kind)
     PlayVoice(kind)
     -- 顺带预览图标蒙版：挂到 CDM 里的骨盾图标上闪 3 秒。
     -- 已经处在真实提醒窗口里就不动它（否则会把正在闪的蒙版提前收掉）。
