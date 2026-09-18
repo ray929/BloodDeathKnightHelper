@@ -216,6 +216,64 @@ check('施放后蒙版清除（alpha 归零）', ov and ov.__alpha == 0, ov and 
 check('施放后蒙版停止脉动', ov and ov.__scripts.OnUpdate == nil)
 check('施放后不再重复播报', env.__sounds and #env.__sounds == 0, #env.__sounds)
 
+io.write('\n== T5b 刷新技能白名单（死亡之握 / 血魔之握 / 憎恶之肢 / 幻舞） ==\n')
+-- 从 /bdk debug 里取 "timer: XX.Xs left" 的剩余秒数
+local function timerLeft()
+    local n = cmd('debug'):match('timer: ([%d%.]+)s left')
+    return tonumber(n)
+end
+local function cast(id)
+    evt.__scripts.OnEvent(evt, 'UNIT_SPELLCAST_SUCCEEDED', 'player', nil, id)
+end
+
+bsItem.IsActive = true
+tick(2)
+local ta = timerLeft()
+check('骨盾在场时倒计时接近 24s', ta and ta > 21 and ta <= 24, tostring(ta))
+
+tick(20)                                    -- 10 秒
+local tb = timerLeft()
+check('倒计时会随时间递减', tb and ta and tb < ta - 8, tostring(ta) .. ' -> ' .. tostring(tb))
+
+-- 拾骨者天赋：拉怪 +1 层，30 秒时长整体刷新。之前白名单里漏了 49576，
+-- 于是死亡之握续了时长却没人知道，倒计时照跑 → 骨盾还剩十几秒就喊话。
+cast(49576)
+local tc = timerLeft()
+check('死亡之握 49576 会重置倒计时（不再漏检）', tc and tb and tc > tb + 8,
+    tostring(tb) .. ' -> ' .. tostring(tc))
+check('骨盾没了那条语音没被误触发', not soundUsed('voice-cn-1.mp3'),
+    table.concat(env.__sounds, ' '))
+
+tick(20)
+local td = timerLeft()
+cast(108199)                                -- 血魔之握：群拉，同样按"能刷新"处理
+local te = timerLeft()
+check('血魔之握 108199 会重置倒计时', te and td and te > td + 8,
+    tostring(td) .. ' -> ' .. tostring(te))
+
+-- 憎恶之肢：持续 12 秒、每秒拉一次 → 窗口里骨盾被反复刷新，
+-- 倒计时必须一路被推迟，不能只在施放那一拍重置一次。
+cast(1263569)
+tick(20)                                    -- 10 秒，仍在 12 秒窗口内
+local tf = timerLeft()
+check('憎恶之肢窗口内倒计时被持续推迟（停在 24s 而不是掉到 14s）', tf and tf > 23, tostring(tf))
+check('debug 打出刷新窗口', cmd('debug'):find('refresh window:', 1, true) ~= nil)
+
+tick(6)                                     -- 再 3 秒，窗口（12s）走完
+local tg = timerLeft()
+check('窗口结束后倒计时开始正常倒数', tg and tg < 23, tostring(tg))
+check('窗口结束后 debug 不再显示刷新窗口',
+    cmd('debug'):find('refresh window:', 1, true) == nil)
+
+tick(20)                                    -- 再 10 秒，把提醒间隔拉远
+local th = timerLeft()
+-- 符文武器幻舞 12.x 只 mirror melee attacks + 加招架，**不产骨盾**：
+-- 它要是还留在白名单里，倒计时会被无谓重置 = 漏报（比漏检更糟）。
+cast(49028)
+local ti = timerLeft()
+check('符文武器幻舞 49028 不再重置倒计时（它不产骨盾）',
+    th and ti and ti <= th + 0.6, tostring(th) .. ' -> ' .. tostring(ti))
+
 io.write('\n== T6 骨盾真正消失（战斗中） ==\n')
 resetSounds()
 bsItem.IsActive = false

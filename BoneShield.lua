@@ -56,13 +56,32 @@ local DOWN_GRACE   = 1.0      -- "不在场"需连续成立多久才被承认。
                               -- 否则去抖就等于"一拍读数直接下结论"，等于没有去抖
 local ABSENT_GRACE = 3        -- CDM 条目"持续"扫不到多久才算没配置（池化帧会瞬态消失）
 
--- 会产生/刷新骨盾的技能
+-- 会**获得/刷新骨盾层数**的技能。骨盾只要涨层，30 秒持续时间就被整体刷新，
+-- 所以施放这些技能 = 倒计时必须重新起算；漏检就会在骨盾其实还剩十几秒时提前喊话。
+--
+-- 值 = "持续刷新窗口"秒数：
+--   0  → 瞬时型：施放那一刻刷新一次
+--   >0 → 持续型：该技能在 N 秒里反复拉怪，骨盾被一次次刷新，倒计时得一路跟着推迟
+--
+-- 依据（12.1，逐条在 warcraft.wiki.gg 核实过，别凭印象往里加）：
+--   195182  Marrowrend          骨髓打击 —— 骨盾的主来源（Bone Shield 页明写）
+--   195292  Death's Caress      —— 技能描述 "generating 2 Bone Shield charges"
+--   49576   Death Grip          死亡之握 ┐ 拾骨者天赋（Bone Collector, 458572）：
+--   108199  Gorefiend's Grasp   血魔之握 ┘ "When you would pull an enemy generate
+--   1263569 Abomination Limb    憎恶之肢   1 charge of Bone Shield"，Affects 正是前两个；
+--                                        憎恶之肢由 12.0.0 重做而来，2026-03-06 的 hotfix
+--                                        专门修过"点拾骨者时它不给骨盾"的问题。
+-- ⚠️ 曾经误收两个，已删，别再捡回来：
+--   49028 符文武器幻舞 —— 12.x 的描述只有 "mirrors your melee attacks" + 30% 招架，
+--                        **不产骨盾**。留在表里会让倒计时被无谓重置 = 漏报，
+--                        而这比漏检更糟（该提醒的时候不提醒）。
+--   439843 —— 查无此技能（wiki 搜索零命中），当初就是猜的，删。
 local REFRESH_IDS = {
-    [195182] = true,  -- 骨髓打击 Marrowrend
-    [195292] = true,  -- 死亡之攫 Death's Caress
-    [108199] = true,  -- 腐烂之握 Gorefiend's Grasp
-    [49028]  = true,  -- 符文武器幻舞 Dancing Rune Weapon
-    [439843] = true,  -- 12.x 可能加骨盾层数的变体
+    [195182]  = 0,   -- Marrowrend 骨髓打击
+    [195292]  = 0,   -- Death's Caress（给 2 层）
+    [49576]   = 0,   -- Death Grip 死亡之握
+    [108199]  = 0,   -- Gorefiend's Grasp 血魔之握
+    [1263569] = 12,  -- Abomination Limb 憎恶之肢：持续 12 秒、每秒拉一次
 }
 
 local VIEWERS = { 'BuffIconCooldownViewer', 'BuffBarCooldownViewer' }
@@ -477,6 +496,8 @@ local state = {
     showingSetup = false,  -- 当前显示的是配置提示还是提醒
     hideAt = nil,      -- 提醒文字自动隐藏时间（由驱动循环检查）
     suppressAlertsUntil = nil, -- 施放刷新技能后的宽限期，避免 CDM 更新延迟导致误报
+    refreshUntil = nil, -- 持续型刷新技能（憎恶之肢）的窗口截止时刻：窗口内骨盾被反复刷新，
+                        -- 倒计时跟着一路推迟，而不是只在施放那一拍重置一次
     lastAlertAt = nil, -- 上次"真的发声"的时刻。跨窗口有效 —— 不能被 ResetWindow /
                        -- ClearWindow 清掉，否则去重就是摆设（去重要挡的正是"窗口刚被
                        -- 清掉、下一条判据立刻又成立"这个情形）。
@@ -700,6 +721,7 @@ local function ClearWindow()
     state.ossUp = false
     state.timerEnd = 0
     state.alerted = false
+    state.refreshUntil = nil   -- 骨盾已经没了，持续刷新窗口随之作废
     state.bsDownSince, state.ossDownSince = nil, nil
     SetFlash(false)
     HideText()
@@ -792,6 +814,17 @@ driver:SetScript('OnUpdate', function()
 
     if not IsBlood() then SetFlash(false) return end
 
+    -- 0. 持续型刷新窗口（目前只有憎恶之肢）：窗口内每秒都在拉怪 → 骨盾被一次次刷新，
+    --    倒计时得跟着一路推迟，而不是只在施放那一拍重置一次。窗口长度由
+    --    REFRESH_IDS 里那个技能自己的持续时间决定，这里只负责"窗口没走完就不许到点"。
+    if state.refreshUntil then
+        if now < state.refreshUntil then
+            if state.bsUp then state.timerEnd = now + WARN_AFTER end
+        else
+            state.refreshUntil = nil
+        end
+    end
+
     -- 1. 倒计时到点（玩家视角约剩 5 秒）：触发提醒
     if state.bsUp and state.timerEnd > 0 and now >= state.timerEnd then
         TriggerAlert('warn')
@@ -878,12 +911,15 @@ evt:SetScript('OnEvent', function(_, event, arg1, _, spellID)
 
     if event == 'UNIT_SPELLCAST_SUCCEEDED' then
         if IsSecret(spellID) then return end
-        if REFRESH_IDS[spellID] and IsBlood() then
+        local win = REFRESH_IDS[spellID]
+        if win and IsBlood() then
             HideText()                -- 立即隐藏文字
             state.bsUp = true         -- 施放刷新技能即视为骨盾存在
             ResetWindow()             -- 启用/重置倒计时
             -- CDM 帧更新通常晚于施法成功事件；宽限 0.8 秒，防止下一拍扫描把瞬态空窗误判为骨盾消失
             state.suppressAlertsUntil = GetTime() + 0.8
+            -- 持续型（win > 0，目前只有憎恶之肢）：记下窗口，之后由驱动每拍推迟倒计时（见驱动第 0 步）
+            state.refreshUntil = (win > 0) and (GetTime() + win) or nil
         end
         return
     end
@@ -1002,6 +1038,11 @@ local function PrintStatus()
         L.cdmBs, TrackDesc(bsFrames, bsProven),
         L.cdmOss, TrackDesc(ossFrames, ossProven)))
     local mask = flashWanted and (DB.flash and L.on or L.off) or L.flashIdle
+    -- 持续型刷新窗口（憎恶之肢）还开着的话，倒计时是被每拍往后推的，
+    -- 单独标出来，免得看到 "timer: 24s left" 不动而以为是卡住了
+    if state.refreshUntil and GetTime() < state.refreshUntil then
+        print(('  refresh window: %.1fs left (timer held)'):format(state.refreshUntil - GetTime()))
+    end
     if state.bsUp and state.timerEnd > 0 then
         print(('  timer: %.1fs left | %s: %s'):format(
             math.max(state.timerEnd - GetTime(), 0), L.flash, mask))
