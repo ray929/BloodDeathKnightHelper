@@ -8,8 +8,8 @@
 --   2. 埋骨之所（Ossuary，骨盾 >= 5 层增益）消失时语音+文字 3 秒提醒一次；
 --   3. 骨盾彻底消失时停止一切提醒。
 --   4. 施放任意会产生/刷新骨盾的技能时，立即隐藏文字、撤掉蒙版并重置倒计时。
---      "会刷新"这件事取决于**前置天赋有没有点**（符文刃舞←不竭之刃；死亡之握/血魔之握/
---      憎恶之肢←拾骨者），所以每个技能都过一道天赋闸门（见文件上方的 GATES 表）；
+--      "会刷新"这件事取决于**前置天赋有没有点**（符文刃舞←无餍狂刃；死亡之握/血魔之握/
+--      憎恶附肢←集骨者），所以每个技能都过一道天赋闸门（见文件上方的 GATES 表）；
 --      没点天赋却当成刷新 → 倒计时被无谓重置 → 该提醒时反而不提醒。
 --   5. 三条判据各有自己的红字文案与语音（见 L.kinds，/bdk bs test 1|2|3 可逐条试听）：
 --        bsGone  骨盾没了      ← voice-cn-1.mp3
@@ -71,18 +71,18 @@ local ABSENT_GRACE = 3        -- CDM 条目"持续"扫不到多久才算没配�
 --   195292  Death's Caress       死神的抚摩 —— 描述 "generating 2 Bone Shield charges"
 --   49028   Dancing Rune Weapon  符文刃舞 —— 给 5 层。⚠️ 技能自身描述**不提骨盾**
 --                              （12.1 只有 "mirrors your melee attacks" + 30% 招架），
---                              给层数的其实是**天赋不竭之刃 Insatiable Blade**(377637)：
+--                              给层数的其实是**天赋无餍狂刃 Insatiable Blade**(377637)：
 --                              "Dancing Rune Weapon's cooldown is reduced by 30 sec and
 --                               now generates 5 Bone Shield charges"（12.0.0 改的）。
 --                              用户 2026-09-18 游戏内实测确认（DRW 后骨盾刷回 30 秒 / 5 层）。
 --                              只看技能描述就会以为它不产骨盾 —— 我们因此误删过一次。
 --                              （更早误归给暗影国度的符文铭刻之力 Crimson Rune Weapon，
 --                                那是过时页面；12.x 的来源就是这条天赋，闸门用的也是它。）
---   49576   Death Grip           死亡之握 ┐ 拾骨者天赋（Bone Collector, 458572）：
+--   49576   Death Grip           死亡之握 ┐ 集骨者天赋（Bone Collector, 458572）：
 --   108199  Gorefiend's Grasp   血魔之握 ┘ "When you would pull an enemy generate
---   1263569 Abomination Limb    憎恶之肢   1 charge of Bone Shield"，Affects 正是前两个；
---                                        憎恶之肢由 12.0.0 重做而来，2026-03-06 的 hotfix
---                                        专门修过"点拾骨者时它不给骨盾"的问题。
+--   1263569 Abomination Limb    憎恶附肢   1 charge of Bone Shield"，Affects 正是前两个；
+--                                        憎恶附肢由 12.0.0 重做而来，2026-03-06 的 hotfix
+--                                        专门修过"点集骨者时它不给骨盾"的问题。
 -- 另：439843 查无此技能（wiki 搜索零命中），当初就是猜的，已删，别再捡回来。
 local REFRESH_IDS = {
     [195182]  = 0,   -- Marrowrend 骨髓打击
@@ -90,7 +90,7 @@ local REFRESH_IDS = {
     [49028]   = 0,   -- Dancing Rune Weapon 符文刃舞（天赋给 5 层，见上）
     [49576]   = 0,   -- Death Grip 死亡之握
     [108199]  = 0,   -- Gorefiend's Grasp 血魔之握
-    [1263569] = 12,  -- Abomination Limb 憎恶之肢：持续 12 秒、每秒拉一次
+    [1263569] = 12,  -- Abomination Limb 憎恶附肢：持续 12 秒、每秒拉一次
 }
 
 -- ============================ 前置天赋闸门 ============================
@@ -100,29 +100,59 @@ local REFRESH_IDS = {
 --
 -- 值 = 该技能的**前置天赋**法术 ID（id 逐个在 warcraft.wiki.gg 核实）：
 local GATES = {
-    [49028]   = 377637,  -- 符文刃舞 ← 不竭之刃 Insatiable Blade
+    [49028]   = 377637,  -- 符文刃舞 ← 无餍狂刃 Insatiable Blade
                          --   "Dancing Rune Weapon's cooldown is reduced by 30 sec and
                          --    **now generates 5 Bone Shield charges**"（12.0.0 起）
                          --   ⚠️ 技能自身描述不提骨盾，给层数写在这个天赋里
     [49576]   = 458572,  -- 死亡之握 ┐
-    [108199]  = 458572,  -- 血魔之握 ├ 拾骨者 Bone Collector：
-    [1263569] = 458572,  -- 憎恶之肢 ┘   "When you would pull an enemy generate 1 charge
+    [108199]  = 458572,  -- 血魔之握 ├ 集骨者 Bone Collector：
+    [1263569] = 458572,  -- 憎恶附肢 ┘   "When you would pull an enemy generate 1 charge
                          --                 of Bone Shield"，Affects 正是前两个；
-                         --                憎恶之肢由 2026-03-06 的 hotfix 明确也会给层
+                         --                憎恶附肢由 2026-03-06 的 hotfix 明确也会给层
 }
 -- 骨髓打击 / 死神的抚摩没有前置天赋（骨盾的本体来源），不在表里 = 闸门常开。
 
--- 天赋名的显示用（debug 输出）。key = 天赋法术 ID，与 GATES 的值对应。
-local GATE_NAMES = {
-    zh = {
-        [377637] = '不竭之刃',
-        [458572] = '拾骨者',
-    },
-    en = {
-        [377637] = 'Insatiable Blade',
-        [458572] = 'Bone Collector',
-    },
+-- 显示名一律**运行时问客户端**（`C_Spell.GetSpellName(id)`），不硬编码任何译名。
+-- 法术名是**本地化的静态数据**：中文客户端返回中文名、英文客户端返回英文名，
+-- 所以连 zh / en 两份表都不用维护 —— 客户端哪天改译名，插件自动跟上。
+-- —— 2026-09-18 改的原因：硬编码把三个名字全写错了（"无餍狂刃"写成"不竭之刃"、
+-- "集骨者"写成"拾骨者"、"憎恶附肢"写成"憎恶之肢"）。判定只认 ID，名字没有任何
+-- 硬编码的理由。（血沸模块一直就是这么做的，见 BoilingPoint.lua 的 SpellName。）
+-- 兜底 `spell:ID`：真读不到（API 缺失 / ID 不存在 / 12.x 哪天把它 secret 化）也只是
+-- 名字难看，不影响判定，更不会打出一张骗人的表。
+-- 缓存**只存成功结果**：某次调用失败（比如战斗中受限）不会把失败钉死，下次还会重试。
+local nameCache = {}
+local function SpellName(id)
+    local hit = nameCache[id]
+    if hit then return hit end
+    local CS = _G.C_Spell
+    local ok, n = pcall(function()
+        local v
+        if CS and CS.GetSpellName then
+            v = CS.GetSpellName(id)
+        elseif _G.GetSpellInfo then
+            v = _G.GetSpellInfo(id)          -- 11.0 起 C_Spell 版取代了它，留作退路
+        end
+        if type(v) ~= 'string' or v == '' then return nil end
+        if issecretvalue and issecretvalue(v) then return nil end   -- secret 值不能进 format
+        return v
+    end)
+    if ok and type(n) == 'string' then
+        nameCache[id] = n
+        return n
+    end
+    return 'spell:' .. tostring(id)
+end
+
+-- 核对表的行结构：**显式有序**。pairs 的顺序每登录一次都可能不同，玩家会以为插件
+-- 在乱跳甚至以为出错，所以顺序写死。
+--   每个天赋一行，箭头后面是它管辖的技能；没有前置天赋的技能单列一段，标"常开"。
+-- ⚠️ 增删 REFRESH_IDS / GATES 后必须同步这里 —— smoke.lua 有断言钉死三者集合一致。
+local GATE_ROWS = {
+    { talent = 377637, skills = { 49028 } },
+    { talent = 458572, skills = { 49576, 108199, 1263569 } },
 }
+local UNGATED_SKILLS = { 195182, 195292 }
 
 -- 闸门缓存：天赋ID → true / false / nil(读不到)。
 -- **天赋是静态数据**（只有非战斗时才能改），所以打赢一次缓存起来重复用，战斗中
@@ -130,6 +160,11 @@ local GATE_NAMES = {
 -- 而"静态数据在非战斗时读一次"天然绕开这个雷区。
 local gateCache = {}
 local gateCacheAt = nil
+
+-- 前向声明：核对表的打印函数定义在文件下半部分（它要用 L 文案表，而 L 是在本地化那段
+-- 才建的），RefreshGates 在它之前 —— 先占个名字，调用处判 nil 就行。
+-- 这样"重读闸门 → 顺手打一张核对表"只有一处，不必在四个触发点各写一遍。
+local PrintGateReport
 
 -- 读"玩家有没有学会这个法术"。天赋点出来后，那个被动法术就进了玩家的法术列表，
 -- 所以 IsSpellKnown 系列能直接反映天赋有没有点。
@@ -165,6 +200,8 @@ local function RefreshGates()
         end
     end
     gateCacheAt = GetTime()
+    -- 读到之后顺手核对一次（内容没变它自己会吞掉，不会刷屏）
+    if PrintGateReport then PrintGateReport() end
     return true
 end
 
@@ -222,13 +259,16 @@ local function ApplyLang()
         }
         L.kindOrder = { 'bsGone', 'ossGone', 'warn' }
         L.lastAlert = '上次提醒'
-        -- 天赋闸门（debug 用）：id 要与文件上方 GATES 里的值一致
+        -- 天赋闸门（debug 用）。天赋 / 技能的名字运行时问客户端，这里不存名字；
+        -- 也不再另存一份 ID 表 —— /bdk debug 直接读 GATE_ROWS，天生与判定同源。
         L.gateLabel = '天赋闸门'
         L.gateYes, L.gateNo, L.gateUnknown = '已点', '未点', '读不到'
-        L.gateList = {
-            { id = 377637, name = '不竭之刃', skill = '符文刃舞' },
-            { id = 458572, name = '拾骨者',   skill = '死亡之握/血魔之握/憎恶之肢' },
-        }
+        -- 登录后打到默认聊天框的核对表（见 PrintGateReport）。
+        -- 配色：插件名绿、技能/天赋名金、常开蓝、启用绿、禁用红。
+        L.reportName   = '鲜血死亡骑士辅助'
+        L.reportTitle  = '刷新骨盾天赋检测：'
+        L.reportAlways = '常开'
+        L.reportOn, L.reportOff = '启用', '禁用'
         L.testHint = '用法：/bdk bs test 1|2|3（1=骨盾没了 2=骨盾层数不够 3=骨盾快没了）'
     else
         L.setupText = 'Drag "Bone Shield" and "Ossuary" into the Cooldown Manager (CDM)'
@@ -252,13 +292,14 @@ local function ApplyLang()
         }
         L.kindOrder = { 'bsGone', 'ossGone', 'warn' }
         L.lastAlert = 'last alert'
-        -- talent gates (debug only): ids must match the GATES table near the top
+        -- talent gates (debug only). Names come from the client at runtime and the
+        -- ID list is GATE_ROWS itself, so this can't drift from the judging logic.
         L.gateLabel = 'talent gates'
         L.gateYes, L.gateNo, L.gateUnknown = 'yes', 'no', 'unknown'
-        L.gateList = {
-            { id = 377637, name = 'Insatiable Blade', skill = 'Dancing Rune Weapon' },
-            { id = 458572, name = 'Bone Collector',   skill = 'Death Grip/Gorefiend\'s Grasp/Abomination Limb' },
-        }
+        L.reportName   = 'Blood Death Knight Helper'
+        L.reportTitle  = 'Bone Shield refresh talent check:'
+        L.reportAlways = 'always on'
+        L.reportOn, L.reportOff = 'enabled', 'disabled'
         L.testHint = 'usage: /bdk bs test 1|2|3 (1=bone shield down 2=not enough stacks 3=expiring)'
     end
 end
@@ -269,6 +310,73 @@ local function KindOf(kind)
     local set = L.kinds
     if not set then return { text = '', voice = 'voice-en.mp3', reason = '?' } end
     return set[kind] or set.warn
+end
+
+---------------------------------------------------------------- 天赋闸门核对表
+-- 登录后（以及换天赋 / 换专精 / 脱战补读）往默认聊天框打一张表，让玩家**自己核对**：
+-- 插件到底认到哪些"刷新骨盾"的技能、每个技能挂在哪条天赋上、那条天赋读到没读到。
+-- 这张表存在的意义是**自证** —— 天赋 ID 若写错，这里会一直显示"禁用"或"读不到"，
+-- 一眼就能看出来，不用去猜是不是插件坏了。
+--
+-- 三条规矩：
+--   1. 只有**真的读到过**（RefreshGates 跑完）才会走到这里。战斗中读不到就不打，
+--      免得打出一张全是"读不到"的表，反而让人以为插件出问题了。
+--   2. 内容没变不重复打：驱动循环 5 秒重读一次，不挡这一道会把聊天框刷满。
+--   3. 技能侧的状态 = GateOpen()，即"此刻算不算刷新源"。读不到天赋时它是 fail-open
+--      的 true，会如实显示成"启用" —— 那不是 bug，是当下真实生效的行为。
+local CLR_GREEN, CLR_RED   = '|cff1eff00', '|cffff2020'
+local CLR_YELLOW, CLR_BLUE = '|cffffd100', '|cff71d5ff'
+
+local function LangKey() return (LOCALE:sub(1, 2) == 'zh') and 'zh' or 'en' end
+
+local gateReportSig   -- 上次打印时的签名；相同就不再刷屏
+
+local function SkillLabel(sid)
+    return GateOpen(sid)
+        and (CLR_GREEN .. L.reportOn .. '|r')
+        or  (CLR_RED .. L.reportOff .. '|r')
+end
+
+PrintGateReport = function()
+    local sig = {}
+    for i = 1, #GATE_ROWS do sig[i] = tostring(gateCache[GATE_ROWS[i].talent]) end
+    sig = table.concat(sig, ',')
+    if sig == gateReportSig then return end
+    gateReportSig = sig
+
+    local lang  = LangKey()
+    local arrow = (lang == 'zh') and ' → ' or ' -> '
+
+    print(CLR_GREEN .. L.reportName .. '|r ' .. L.reportTitle)
+
+    -- 没有前置天赋的：永远不会被闸门关掉，标"常开"
+    for i = 1, #UNGATED_SKILLS do
+        local id = UNGATED_SKILLS[i]
+        print(('  %s%s|r  %s%s|r'):format(CLR_YELLOW, SpellName(id),
+            CLR_BLUE, L.reportAlways))
+    end
+
+    -- 有前置天赋的：天赋一行，箭头后面是它管辖的技能（各带自己的状态）
+    for i = 1, #GATE_ROWS do
+        local row = GATE_ROWS[i]
+        local v = gateCache[row.talent]
+        local state
+        if v == nil then
+            state = CLR_BLUE .. L.gateUnknown .. '|r'   -- 读不到就说读不到，不编
+        elseif v then
+            state = CLR_GREEN .. L.reportOn .. '|r'
+        else
+            state = CLR_RED .. L.reportOff .. '|r'
+        end
+        local list = {}
+        for j = 1, #row.skills do
+            local sid = row.skills[j]
+            list[j] = ('%s%s|r %s'):format(CLR_YELLOW, SpellName(sid),
+                SkillLabel(sid))
+        end
+        print(('  %s%s|r %s%s%s'):format(CLR_YELLOW, SpellName(row.talent),
+            state, arrow, table.concat(list, ' / ')))
+    end
 end
 
 ---------------------------------------------------------------- 设置
@@ -606,7 +714,7 @@ local state = {
     showingSetup = false,  -- 当前显示的是配置提示还是提醒
     hideAt = nil,      -- 提醒文字自动隐藏时间（由驱动循环检查）
     suppressAlertsUntil = nil, -- 施放刷新技能后的宽限期，避免 CDM 更新延迟导致误报
-    refreshUntil = nil, -- 持续型刷新技能（憎恶之肢）的窗口截止时刻：窗口内骨盾被反复刷新，
+    refreshUntil = nil, -- 持续型刷新技能（憎恶附肢）的窗口截止时刻：窗口内骨盾被反复刷新，
                         -- 倒计时跟着一路推迟，而不是只在施放那一拍重置一次
     lastAlertAt = nil, -- 上次"真的发声"的时刻。跨窗口有效 —— 不能被 ResetWindow /
                        -- ClearWindow 清掉，否则去重就是摆设（去重要挡的正是"窗口刚被
@@ -930,7 +1038,7 @@ driver:SetScript('OnUpdate', function()
         RefreshGates()
     end
 
-    -- 0. 持续型刷新窗口（目前只有憎恶之肢）：窗口内每秒都在拉怪 → 骨盾被一次次刷新，
+    -- 0. 持续型刷新窗口（目前只有憎恶附肢）：窗口内每秒都在拉怪 → 骨盾被一次次刷新，
     --    倒计时得跟着一路推迟，而不是只在施放那一拍重置一次。窗口长度由
     --    REFRESH_IDS 里那个技能自己的持续时间决定，这里只负责"窗口没走完就不许到点"。
     if state.refreshUntil then
@@ -983,6 +1091,18 @@ local function RegisterEvents()
     evt:RegisterEvent('PLAYER_ENTERING_WORLD')
     evt:RegisterEvent('PLAYER_SPECIALIZATION_CHANGED')
     evt:RegisterUnitEvent('UNIT_SPELLCAST_SUCCEEDED', 'player')
+    -- 天赋 / 法术书变更、脱战：都要重读闸门缓存。
+    -- ⚠️ 12.x 里给 RegisterEvent 喂一个本客户端不认识的事件名会**直接抛错**，
+    --    所以这四条一律 pcall 注册 —— 少一条也不致命（驱动循环每 5 秒还有兜底）。
+    --    （这三条天赋事件此前只在 OnEvent 里写了分支、却从没注册过，等于死代码；
+    --      2026-09-18 补上。测试直接手工调 OnEvent，所以一直没暴露出来。）
+    local more = {
+        'PLAYER_TALENT_UPDATE',   -- 换天赋
+        'TRAIT_CONFIG_UPDATED',   -- 换天赋配置（9.0 起）
+        'SPELLS_CHANGED',         -- 法术书变了（登录、学技能都会发）
+        'PLAYER_REGEN_ENABLED',   -- 脱战：战斗中登录时缓存是空的，这一刻立刻补读
+    }
+    for i = 1, #more do pcall(evt.RegisterEvent, evt, more[i]) end
 end
 
 evt:RegisterEvent('ADDON_LOADED')
@@ -1010,10 +1130,21 @@ evt:SetScript('OnEvent', function(_, event, arg1, _, spellID)
         -- 重新计时：换地图/进本时 CDM 可能要重建帧池，别让上一条目的"最近扫到时间"
         -- 直接过期，否则刚进本就弹一次"未配置"的提示
         bsSeenAt, ossSeenAt = GetTime(), GetTime()
+        -- 登录就读天赋。⚠️ 若此刻正处于战斗（掉线重连 / 副本内重新载入），
+        -- InCombatLockdown 会让这次读取原地放弃、缓存保持全空 —— 见下面
+        -- PLAYER_REGEN_ENABLED：脱战那一瞬会立刻补读，不会一直空着。
         RefreshGates()
         StartDriver()
         ScanCdmFrames()
         UpdateCdmState()
+        return
+    end
+
+    -- 脱战：登录时若正处在战斗中，上面那次读取是被挡掉的（缓存全空 → 闸门只能
+    -- fail-open，那一场战斗里可能漏报预警）。这里立刻补读，不用等驱动循环的 5 秒兜底，
+    -- 保证下一次开怪之前判定就是准的。
+    if event == 'PLAYER_REGEN_ENABLED' then
+        RefreshGates()
         return
     end
 
@@ -1045,7 +1176,7 @@ evt:SetScript('OnEvent', function(_, event, arg1, _, spellID)
             ResetWindow()             -- 启用/重置倒计时
             -- CDM 帧更新通常晚于施法成功事件；宽限 0.8 秒，防止下一拍扫描把瞬态空窗误判为骨盾消失
             state.suppressAlertsUntil = GetTime() + 0.8
-            -- 持续型（win > 0，目前只有憎恶之肢）：记下窗口，之后由驱动每拍推迟倒计时（见驱动第 0 步）
+            -- 持续型（win > 0，目前只有憎恶附肢）：记下窗口，之后由驱动每拍推迟倒计时（见驱动第 0 步）
             state.refreshUntil = (win > 0) and (GetTime() + win) or nil
         end
         return
@@ -1165,7 +1296,7 @@ local function PrintStatus()
         L.cdmBs, TrackDesc(bsFrames, bsProven),
         L.cdmOss, TrackDesc(ossFrames, ossProven)))
     local mask = flashWanted and (DB.flash and L.on or L.off) or L.flashIdle
-    -- 持续型刷新窗口（憎恶之肢）还开着的话，倒计时是被每拍往后推的，
+    -- 持续型刷新窗口（憎恶附肢）还开着的话，倒计时是被每拍往后推的，
     -- 单独标出来，免得看到 "timer: 24s left" 不动而以为是卡住了
     if state.refreshUntil and GetTime() < state.refreshUntil then
         print(('  refresh window: %.1fs left (timer held)'):format(state.refreshUntil - GetTime()))
@@ -1185,11 +1316,14 @@ local function PrintStatus()
     -- 天赋闸门：哪些"刷新技能"此刻真的算刷新源。
     -- **这里也是验 ID 的地方** —— 明明点了天赋却显示"未点"或"读不到"，
     -- 就是 GATES 里的 ID 写错了、或者该换一条检测 API。
-    for i = 1, #L.gateList do
-        local g = L.gateList[i]
-        local v = gateCache[g.id]
+    for i = 1, #GATE_ROWS do
+        local row = GATE_ROWS[i]
+        local v = gateCache[row.talent]
         local s = (v == true and L.gateYes) or (v == false and L.gateNo) or L.gateUnknown
-        print(('  %s %s %d: %s → %s'):format(L.gateLabel, g.name, g.id, s, g.skill))
+        local list = {}
+        for j = 1, #row.skills do list[j] = SpellName(row.skills[j]) end
+        print(('  %s %s %d: %s → %s'):format(L.gateLabel, SpellName(row.talent),
+            row.talent, s, table.concat(list, ' / ')))
     end
 end
 

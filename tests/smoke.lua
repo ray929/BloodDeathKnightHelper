@@ -72,6 +72,22 @@ local bsItem  = viewer.__items[1]
 local ossItem = viewer.__items[2]
 bsItem.IsActive, ossItem.IsActive = false, false
 
+------------------------------------------------------------------ 显示名映射
+-- 技能 / 天赋的显示名由被测代码在运行时问客户端（C_Spell.GetSpellName），桩默认返回
+-- "spell<id>"。这里塞一份"中文客户端该给出的名字"。
+-- ⚠️ 必须**在加载插件之前**塞好：名字有缓存（只存成功结果），塞晚了，之前读到的
+--    兜底名会先被缓存住，后面所有具名断言都会红。
+env.__spellNames = {
+    [195182]  = '骨髓打击',
+    [195292]  = '死神的抚摩',
+    [49028]   = '符文刃舞',
+    [49576]   = '死亡之握',
+    [108199]  = '血魔之握',
+    [1263569] = '憎恶附肢',
+    [377637]  = '无餍狂刃',
+    [458572]  = '集骨者',
+}
+
 ------------------------------------------------------------------ 加载插件
 -- 按 toc 的顺序：Commands.lua（命令表）先加载，模块往它里面登记子命令。
 local ROOT = ADDON:gsub('[^/\\]*$', '')
@@ -95,10 +111,10 @@ env.__driver = driver
 env.__alertText = ENV.fonts[1]
 assert(env.__alertText, 'alert fontstring not found')
 
--- 天赋闸门：默认按"标准流派该点的都点了"配置（不竭之刃 + 拾骨者），与真人玩家常态一致。
+-- 天赋闸门：默认按"标准流派该点的都点了"配置（无餍狂刃 + 集骨者），与真人玩家常态一致。
 -- 桩里 __talents 是空表，不设的话闸门全关 —— 所有拉怪 / 刃舞技能都会被判成"不刷新"。
-env.__talents[377637] = true   -- 不竭之刃 Insatiable Blade：符文刃舞给 5 层
-env.__talents[458572] = true   -- 拾骨者 Bone Collector：拉怪给 1 层
+env.__talents[377637] = true   -- 无餍狂刃 Insatiable Blade：符文刃舞给 5 层
+env.__talents[458572] = true   -- 集骨者 Bone Collector：拉怪给 1 层
 
 env.SlashCmdList.BLOODDEATHKNIGHT('')                     -- 加载前不许崩
 evt.__scripts.OnEvent(evt, 'ADDON_LOADED', 'BloodDeathKnightHelper')
@@ -221,7 +237,7 @@ check('施放后蒙版清除（alpha 归零）', ov and ov.__alpha == 0, ov and 
 check('施放后蒙版停止脉动', ov and ov.__scripts.OnUpdate == nil)
 check('施放后不再重复播报', env.__sounds and #env.__sounds == 0, #env.__sounds)
 
-io.write('\n== T5b 刷新技能白名单（死亡之握 / 血魔之握 / 憎恶之肢 / 符文刃舞） ==\n')
+io.write('\n== T5b 刷新技能白名单（死亡之握 / 血魔之握 / 憎恶附肢 / 符文刃舞） ==\n')
 -- 从 /bdk debug 里取 "timer: XX.Xs left" 的剩余秒数
 local function timerLeft()
     local n = cmd('debug'):match('timer: ([%d%.]+)s left')
@@ -240,7 +256,7 @@ tick(20)                                    -- 10 秒
 local tb = timerLeft()
 check('倒计时会随时间递减', tb and ta and tb < ta - 8, tostring(ta) .. ' -> ' .. tostring(tb))
 
--- 拾骨者天赋：拉怪 +1 层，30 秒时长整体刷新。之前白名单里漏了 49576，
+-- 集骨者天赋：拉怪 +1 层，30 秒时长整体刷新。之前白名单里漏了 49576，
 -- 于是死亡之握续了时长却没人知道，倒计时照跑 → 骨盾还剩十几秒就喊话。
 cast(49576)
 local tc = timerLeft()
@@ -256,12 +272,12 @@ local te = timerLeft()
 check('血魔之握 108199 会重置倒计时', te and td and te > td + 8,
     tostring(td) .. ' -> ' .. tostring(te))
 
--- 憎恶之肢：持续 12 秒、每秒拉一次 → 窗口里骨盾被反复刷新，
+-- 憎恶附肢：持续 12 秒、每秒拉一次 → 窗口里骨盾被反复刷新，
 -- 倒计时必须一路被推迟，不能只在施放那一拍重置一次。
 cast(1263569)
 tick(20)                                    -- 10 秒，仍在 12 秒窗口内
 local tf = timerLeft()
-check('憎恶之肢窗口内倒计时被持续推迟（停在 24s 而不是掉到 14s）', tf and tf > 23, tostring(tf))
+check('憎恶附肢窗口内倒计时被持续推迟（停在 24s 而不是掉到 14s）', tf and tf > 23, tostring(tf))
 check('debug 打出刷新窗口', cmd('debug'):find('refresh window:', 1, true) ~= nil)
 
 tick(6)                                     -- 再 3 秒，窗口（12s）走完
@@ -272,7 +288,7 @@ check('窗口结束后 debug 不再显示刷新窗口',
 
 tick(20)                                    -- 再 10 秒，把提醒间隔拉远
 local th = timerLeft()
--- 符文刃舞 49028：技能自身描述不提骨盾，但天赋**不竭之刃**（Insatiable Blade, 377637）
+-- 符文刃舞 49028：技能自身描述不提骨盾，但天赋**无餍狂刃**（Insatiable Blade, 377637）
 -- 让它 "generates 5 Bone Shield charges"（用户游戏内实测确认）。给 5 层 = 时长整体刷新，
 -- 所以它必须重置倒计时 —— 曾经因为它"描述里没写骨盾"被误删过一次，别再删。
 -- 同时它依赖该天赋 → 见下方 T5c 的闸门测试。
@@ -289,7 +305,7 @@ check('符文刃舞是瞬时型（窗口 0），3 秒后倒计时照常递减',
 
 io.write('\n== T5c 前置天赋闸门 ==\n')
 -- 刷新技能到底产不产骨盾，取决于**前置天赋**有没有点：
---   符文刃舞 ← 不竭之刃(377637)；死亡之握/血魔之握/憎恶之肢 ← 拾骨者(458572)。
+--   符文刃舞 ← 无餍狂刃(377637)；死亡之握/血魔之握/憎恶附肢 ← 集骨者(458572)。
 -- 没点却当成刷新 → 倒计时被无谓重置 → 该提醒时不提醒。
 -- 天赋是静态数据（只有非战斗时能改），所以代码非战斗时读一次缓存、战斗中只用缓存值，
 -- 这里就照这个节奏测。
@@ -300,33 +316,33 @@ tick(30)                                    -- 走完上段遗留的刷新窗口
 local g0 = timerLeft()
 check('闸门起手：骨盾在场、倒计时在走', g0 and g0 < 20, tostring(g0))
 
--- (a) 关掉不竭之刃 → 符文刃舞不再算刷新源
+-- (a) 关掉无餍狂刃 → 符文刃舞不再算刷新源
 env.__talents[377637] = false
 evt.__scripts.OnEvent(evt, 'PLAYER_TALENT_UPDATE', 'player')  -- 天赋变了，立刻重读
 cast(49028)
 local g1 = timerLeft()
-check('没点不竭之刃时，符文刃舞不再重置倒计时', g0 and g1 and g1 <= g0 + 0.6,
+check('没点无餍狂刃时，符文刃舞不再重置倒计时', g0 and g1 and g1 <= g0 + 0.6,
     tostring(g0) .. ' -> ' .. tostring(g1))
 
 env.__talents[377637] = true
 evt.__scripts.OnEvent(evt, 'PLAYER_TALENT_UPDATE', 'player')
 cast(49028)
 local g2 = timerLeft()
-check('点出不竭之刃后，符文刃舞照常重置倒计时', g1 and g2 and g2 > g1 + 8,
+check('点出无餍狂刃后，符文刃舞照常重置倒计时', g1 and g2 and g2 > g1 + 8,
     tostring(g1) .. ' -> ' .. tostring(g2))
 
--- (b) 关掉拾骨者 → 两个拉怪技能都不再算刷新源
+-- (b) 关掉集骨者 → 两个拉怪技能都不再算刷新源
 env.__talents[458572] = false
 evt.__scripts.OnEvent(evt, 'PLAYER_TALENT_UPDATE', 'player')
 tick(20)
 local g3 = timerLeft()
 cast(49576)
 local g4 = timerLeft()
-check('没点拾骨者时，死亡之握不再重置倒计时', g3 and g4 and g4 <= g3 + 0.6,
+check('没点集骨者时，死亡之握不再重置倒计时', g3 and g4 and g4 <= g3 + 0.6,
     tostring(g3) .. ' -> ' .. tostring(g4))
 cast(108199)
 local g5 = timerLeft()
-check('没点拾骨者时，血魔之握同样不重置', g4 and g5 and g5 <= g4 + 0.6,
+check('没点集骨者时，血魔之握同样不重置', g4 and g5 and g5 <= g4 + 0.6,
     tostring(g4) .. ' -> ' .. tostring(g5))
 
 -- (c) 闸门只管有前置天赋的技能：骨髓打击不受影响
@@ -355,10 +371,10 @@ env.__inCombat = true          -- 还原成战斗中（下面 T6 的"骨盾没�
 -- (e) debug 里能看到闸门状态 —— 也是**核对天赋 ID 的地方**：
 --     明明点了天赋却显示"未点/读不到"，就是 ID 写错了、或者该换检测 API
 local gd = cmd('debug')
-check('debug 打出不竭之刃闸门（带 ID，便于核对）',
-    gd:find('不竭之刃 377637: 已点', 1, true) ~= nil, gd)
-check('debug 打出拾骨者闸门（带 ID，便于核对）',
-    gd:find('拾骨者 458572: 已点', 1, true) ~= nil, gd)
+check('debug 打出无餍狂刃闸门（带 ID，便于核对）',
+    gd:find('无餍狂刃 377637: 已点', 1, true) ~= nil, gd)
+check('debug 打出集骨者闸门（带 ID，便于核对）',
+    gd:find('集骨者 458572: 已点', 1, true) ~= nil, gd)
 
 io.write('\n== T6 骨盾真正消失（战斗中） ==\n')
 resetSounds()
@@ -585,6 +601,127 @@ local idle = cmd('bs test')
 check('非鲜血专精 bs test 只说待机',
     idle:find('非鲜血死亡骑士', 1, true) ~= nil and idle:find('test: shown=', 1, true) == nil, idle)
 env.__spec = 1
+
+io.write('\n== T12 天赋闸门核对表（登录后打到聊天框） ==\n')
+-- 这张表是给玩家**自己核对**用的：插件认到哪些刷新骨盾的技能、每个挂在哪条天赋上、
+-- 那条天赋读到没读到。守三件事：登录/脱战一定出表；内容没变不重复刷屏；
+-- 读不到就说"读不到"，不许假装成"禁用"（那会把人引向错误的排查方向）。
+local combatBefore = env.__inCombat
+env.__spec = 1
+env.__talents[377637], env.__talents[458572] = true, true
+
+-- (a) 事件必须真的注册上 —— 这几条此前只在 OnEvent 里写了分支、却从没注册过，
+--     等于死代码（测试手工调 OnEvent，所以一直没暴露）。
+check('注册了 PLAYER_TALENT_UPDATE', evt.__events.PLAYER_TALENT_UPDATE == true)
+check('注册了 TRAIT_CONFIG_UPDATED', evt.__events.TRAIT_CONFIG_UPDATED == true)
+check('注册了 SPELLS_CHANGED', evt.__events.SPELLS_CHANGED == true)
+check('注册了 PLAYER_REGEN_ENABLED（战斗中登录的补救）',
+    evt.__events.PLAYER_REGEN_ENABLED == true)
+
+-- (b) 先把"已打印的内容"钉成两个天赋都启用（非战斗跑几拍，驱动 5 秒兜底会重读并打表）。
+--     不然下面"没打表"可能只是因为内容没变，测了个寂寞。
+env.__inCombat = false
+env.__talents[377637], env.__talents[458572] = true, true
+tick(11)
+drain()                          -- 丢掉这一张
+
+-- (c) 换成另一份配置 + 在战斗中登录：读不到 → 既不许调 API，也不许打表
+env.__talents[377637], env.__talents[458572] = false, false
+env.__inCombat = true
+clearLines()
+local callsBefore = env.__spellKnownCalls
+evt.__scripts.OnEvent(evt, 'PLAYER_ENTERING_WORLD')
+check('战斗中登录：一次天赋检测 API 都不调',
+    env.__spellKnownCalls == callsBefore,
+    tostring(callsBefore) .. ' -> ' .. tostring(env.__spellKnownCalls))
+check('战斗中登录不打核对表（读不到就不编）', #env.__lines == 0,
+    table.concat(env.__lines, ' | '))
+
+-- (d) 脱战那一瞬立刻补读 → 出表，内容是刚换上的那份配置
+env.__inCombat = false
+evt.__scripts.OnEvent(evt, 'PLAYER_REGEN_ENABLED')
+local rep = drain()
+check('脱战后立刻补读并打出核对表',
+    rep:find('刷新骨盾天赋检测', 1, true) ~= nil, rep)
+check('表头是插件显示名', rep:find('鲜血死亡骑士辅助', 1, true) ~= nil, rep)
+check('读到的是脱战后那份配置（天赋禁用）',
+    rep:find('集骨者|r |cffff2020禁用|r', 1, true) ~= nil, rep)
+check('无前置天赋的技能标"常开"',
+    rep:find('骨髓打击', 1, true) ~= nil and rep:find('常开', 1, true) ~= nil, rep)
+-- 六个刷新技能一个都不能漏（= REFRESH_IDS 的全集，漏一个就是那一个没在管）
+for _, n in ipairs({ '骨髓打击', '死神的抚摩', '符文刃舞',
+                     '死亡之握', '血魔之握', '憎恶附肢' }) do
+    check('核对表列出 ' .. n, rep:find(n, 1, true) ~= nil, rep)
+end
+
+-- (e) 天赋点回来 → 重打，格式是"天赋名 启用 → 技能名 启用"
+env.__talents[377637], env.__talents[458572] = true, true
+evt.__scripts.OnEvent(evt, 'PLAYER_TALENT_UPDATE', 'player')
+local rep2 = drain()
+check('无餍狂刃一行：启用 → 符文刃舞 启用',
+    rep2:find('无餍狂刃|r |cff1eff00启用|r → |cffffd100符文刃舞|r |cff1eff00启用|r', 1, true) ~= nil,
+    rep2)
+check('集骨者一行把三个拉怪技能都列上（各带状态、/ 分隔）',
+    rep2:find('死亡之握|r |cff1eff00启用|r / |cffffd100血魔之握|r |cff1eff00启用|r'
+        .. ' / |cffffd100憎恶附肢|r |cff1eff00启用|r', 1, true) ~= nil, rep2)
+
+-- (f) 内容没变 → 不再重复打（驱动 5 秒重读一次，不挡会刷屏）
+clearLines()
+evt.__scripts.OnEvent(evt, 'PLAYER_TALENT_UPDATE', 'player')
+check('内容没变不重复刷屏', #env.__lines == 0, table.concat(env.__lines, ' | '))
+
+-- (g) 只关掉其中一个天赋 → 重打，那一条标"禁用"，另一条不受影响
+env.__talents[458572] = false
+evt.__scripts.OnEvent(evt, 'PLAYER_TALENT_UPDATE', 'player')
+local rep3 = drain()
+check('关掉集骨者后重打并标"禁用"',
+    rep3:find('集骨者|r |cffff2020禁用|r', 1, true) ~= nil, rep3)
+check('被关掉的天赋下，技能也标"禁用"',
+    rep3:find('死亡之握|r |cffff2020禁用|r', 1, true) ~= nil, rep3)
+check('没被波及的无餍狂刃仍是"启用"',
+    rep3:find('无餍狂刃|r |cff1eff00启用|r', 1, true) ~= nil, rep3)
+
+-- (h) 检测 API 全被挡 → 表里写"读不到"，而不是假装"禁用"
+env.__noSpellKnownApi = true
+evt.__scripts.OnEvent(evt, 'PLAYER_TALENT_UPDATE', 'player')
+local rep4 = drain()
+check('读不到时写"读不到"',
+    rep4:find('无餍狂刃|r |cff71d5ff读不到|r', 1, true) ~= nil, rep4)
+check('读不到时不写"禁用"（别把人引向错误方向）',
+    rep4:find('禁用', 1, true) == nil, rep4)
+
+-- (i) "名字是问客户端要的"这件事，直接用源码钉死：代码里不许出现任何技能 / 天赋名。
+--     只查**代码部分**（先剥掉行尾注释）—— 注释里当然会提到这些名字，那是写给人看的。
+--     这是最硬的证据：代码里没写名字，名字就只能来自客户端。以后也就不会再出
+--     "国服译名和插件里写的不一样"这种事故（2026-09-18 三个名字全写错过）。
+do
+    local fh = assert(io.open(ADDON, 'rb'))
+    local src = fh:read('a')
+    fh:close()
+    local names = {
+        '骨髓打击', '死神的抚摩', '符文刃舞', '死亡之握', '血魔之握', '憎恶附肢',
+        '无餍狂刃', '集骨者',
+        'Marrowrend', "Death's Caress", 'Dancing Rune Weapon', 'Death Grip',
+        "Gorefiend's Grasp", 'Abomination Limb', 'Insatiable Blade', 'Bone Collector',
+    }
+    local bad = {}
+    local lineNo = 0
+    for line in ((src:gsub('\r', '')) .. '\n'):gmatch('([^\n]*)\n') do
+        lineNo = lineNo + 1
+        local code = line:gsub('%-%-.*$', '')
+        for i = 1, #names do
+            if code:find(names[i], 1, true) then
+                bad[#bad + 1] = ('第 %d 行有 %s'):format(lineNo, names[i])
+            end
+        end
+    end
+    check('代码里没有任何硬编码的技能 / 天赋名（名字只来自客户端）',
+        #bad == 0, table.concat(bad, '; '))
+end
+
+env.__noSpellKnownApi = false
+env.__talents[377637], env.__talents[458572] = true, true
+env.__inCombat = combatBefore
 
 io.write(('\n结果：%d 通过 / %d 失败\n'):format(passes, fails))
 os.exit(fails == 0 and 0 or 1)

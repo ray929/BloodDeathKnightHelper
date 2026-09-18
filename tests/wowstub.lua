@@ -140,10 +140,14 @@ function ENV.install(lang)
     -- 天赋闸门用的"玩家学了哪些法术"。__talents[spellID] = true 表示该天赋已点出。
     -- __noSpellKnownApi = true 模拟**所有**检测 API 都不可用/被挡（12.x 战斗中的那种情形），
     -- 用来验证代码走 fail-open 兜底而不是把技能误判成"不刷新"。
+    -- __spellKnownCalls 记调用次数：用来断言"战斗中一次都不许读天赋"（只看返回值区分不了
+    -- "没读"和"读了但结果一样"）。
     out.__talents        = {}
+    out.__spellKnownCalls = 0
     out.__noSpellKnownApi = false
     out.C_SpellBook = {
         IsSpellKnown = function(id)
+            out.__spellKnownCalls = out.__spellKnownCalls + 1
             if out.__noSpellKnownApi then error('blocked in combat') end
             return out.__talents[id] == true
         end,
@@ -175,9 +179,17 @@ function ENV.install(lang)
     }
     function out.addCooldown(id, info) out.__cooldowns[id] = info end
 
+    -- 显示名也是"问客户端要"的（C_Spell.GetSpellName）。桩默认给一个**一眼假**的名字
+    -- （spell<id>）——于是任何"像真名字"的输出都必然来自测试塞进 __spellNames 的映射，
+    -- "名字又被硬编码回代码里"这种回归会被 smoke T12 的断言捉住。
+    -- 放这里（install，公共基础环境）而不是 installBP：骨盾测试只用 install。
+    out.__spellNames = {}
     out.C_Spell = {
         GetSpellInfo    = function(id) return { name = 'spell' .. tostring(id) } end,
         GetSpellTexture = function() return 134000 end,
+        GetSpellName    = function(id)
+            return out.__spellNames[id] or ('spell' .. tostring(id))
+        end,
     }
 
     out.SlashCmdList = {}      -- 插件会往里写 BLOODDEATHKNIGHT
@@ -302,11 +314,12 @@ function ENV.installBP(env)
     function env.overlay(id, on) env.__overlay[id] = on and true or nil end
 
     -- base/override 映射：override 只覆盖有登记的那些
+    -- 名字桩（GetSpellName / __spellNames）定义在 install 里 —— 骨盾测试只调 install，
+    -- 放这儿会漏掉它。别在这里重复定义，两份真理迟早不同步。
     env.__base, env.__override = { [50842] = 50842 }, {}
     env.C_Spell = env.C_Spell or {}
     env.C_Spell.GetBaseSpell     = function(id) return env.__base[id] end
     env.C_Spell.GetOverrideSpell = function(id) return env.__override[id] or id end
-    env.C_Spell.GetSpellName     = function(id) return 'spell' .. tostring(id) end
 
     -- 定时器：NewTicker + Cancel。runTickers 按固定 0.1 秒步进推进受控时钟，
     -- 时钟必须无条件前进 —— 一个 ticker 都没有的时候（模块停表了）时间照样在走，
