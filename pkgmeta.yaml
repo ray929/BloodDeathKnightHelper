@@ -8,7 +8,10 @@ enable-nolib-creation: no
 # 详见 AGENTS.md 第 6 节。
 #
 # 点开头的路径（.git / .gitattributes / .workbuddy …）CF 会自动忽略，下面再列一遍只是
-# 把意图写明白；真正必须挡的是 tests / README.md / AGENTS.md 这些非点开头的开发资料。
+# 把意图写明白；真正必须挡的是 package.cmd / tests / README.md / AGENTS.md 这些
+# 非点开头的开发资料 —— CF 打包器会把仓库里**所有未忽略的文件**塞进 zip，
+# 所以新增任何开发用文件时，记得往这里补一条。
+# 清单需与 .gitignore、package.cmd 三者保持一致（同一个排除口径）。
 ignore:
   - .gitignore
   - .gitattributes
@@ -17,3 +20,7 @@ ignore:
   - README.md
   - docs
   - tests
+  # 本地打包脚本与它的产物（见 package.cmd）
+  - package.cmd
+  - build
+  - '*.zip'

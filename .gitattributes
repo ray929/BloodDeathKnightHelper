@@ -1,8 +1,15 @@
 # 一律使用 LF 换行，避免 Windows / CI 之间的无谓 diff
 #
-# 注意：现有文件历史上是 CRLF，加上这条之后**下次 git add 会把它们整篇规范化成 LF**
-# —— 那一次提交会出现"整文件重写"式的 diff，是一次性的，属预期。
+# 入库内容本来就已经是 LF（拿 `git ls-files --eol` 验，应为 i/lf w/lf），
+# 历次提交也从没出现过"整文件重写"式的 diff。⚠️ `git add --renormalize --dry-run`
+# 会把所有文件都列出来，**不代表真有换行改动**，不要被它骗了。
 * text=auto eol=lf
+
+# Windows 批处理例外：cmd.exe 传统上按 CRLF 交付，交给 git 在 checkout 时转换
+# （仓库里仍存 LF）。实测 LF 版在 Win11 的 cmd 下能正常跑，这条是保险 ——
+# 个别 cmd.exe 对 LF-only 脚本的 goto / 块解析有过历史坑。
+*.cmd text eol=crlf
+*.bat text eol=crlf
 
 # 二进制资源不做换行转换
 *.zip binary
