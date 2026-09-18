@@ -10,15 +10,7 @@
 ## SavedVariables: BloodDeathKnightDB
 ## DefaultState: enabled
 ## Category: Combat
-
-# 版本号与作者由打包器代入，不要改回硬编码值（同 NaowhSR_zhCN 的约定）：
-#   ## Version: @project-version@  → 打什么 tag 就是什么版本号
-#   ## Author:  @project-author@  → GitHub 仓库 owner 用户名
-# 发布前先打 tag：git tag 1.0.0 && git push origin main --tags
-# （CF 从 GitHub 仓库直接拉取打包，不需要 GitHub Action；详见 AGENTS.md 第 6 节）
-#
-# 在 CurseForge 建好项目后，取消下面这行的注释并填上项目 ID
-# ## X-Curse-Project-ID: 0
+## X-Curse-Project-ID: 1699622
 
 # 命令表先加载（模块往它里面登记，见 Commands.lua 头部说明）
 Commands.lua
