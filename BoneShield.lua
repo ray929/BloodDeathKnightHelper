@@ -15,6 +15,7 @@
 --        bsGone  骨盾没了      ← voice-cn-1.mp3
 --        ossGone 骨盾层数不够  ← voice-cn-2.mp3
 --        warn    骨盾快没了    ← voice-cn-3.mp3（倒计时到点，提前预警）
+--      （/bdk bs sound1 可把中文切成"三条都用 voice-cn.mp3"的单文件模式；默认仍是三条分开）
 --      英文三条共用 voice-en.mp3。它们可能在同一拍或半秒内接连成立，所以 2 秒内只发
 --      一次声（ALERT_GAP）——重复发声纯属噪音，但**文字不吞**，会换成最新那条判据的话。
 --
@@ -258,6 +259,13 @@ local function ApplyLang()
             warn    = { text = '骨盾快没了',   voice = 'voice-cn-3.mp3', reason = '倒计时到点（提前预警）' },
         }
         L.kindOrder = { 'bsGone', 'ossGone', 'warn' }
+        -- 中文语音的"单文件"口味（/bdk bs sound1）：三条判据共用 voice-cn.mp3。
+        -- 英文分支把它设成 nil —— 英文本来就只有一条语音，开关对它不适用。
+        L.voiceSingle  = 'voice-cn.mp3'
+        L.soundMode    = '中文语音'
+        L.sound1Single = '单文件 voice-cn.mp3'
+        L.sound1Split  = '三条分开 voice-cn-1/2/3'
+        L.sound1Na     = '当前语言只有一条语音，这个开关不适用'
         L.lastAlert = '上次提醒'
         -- 天赋闸门（debug 用）。天赋 / 技能的名字运行时问客户端，这里不存名字；
         -- 也不再另存一份 ID 表 —— /bdk debug 直接读 GATE_ROWS，天生与判定同源。
@@ -291,6 +299,13 @@ local function ApplyLang()
             warn    = { text = 'Bone Shield expiring!', voice = 'voice-en.mp3', reason = 'early warning (timer)' },
         }
         L.kindOrder = { 'bsGone', 'ossGone', 'warn' }
+        -- 英文只有一条语音，没有"单文件 / 三条分开"可选 —— 设 nil 让开关自动失效
+        -- （VoiceFile 只在它非 nil 时才覆盖）。
+        L.voiceSingle  = nil
+        L.soundMode    = 'Chinese voice'
+        L.sound1Single = 'single file voice-cn.mp3'
+        L.sound1Split  = 'three separate voice-cn-1/2/3'
+        L.sound1Na     = 'the current language has a single voice file - nothing to toggle'
         L.lastAlert = 'last alert'
         -- talent gates (debug only). Names come from the client at runtime and the
         -- ID list is GATE_ROWS itself, so this can't drift from the judging logic.
@@ -389,6 +404,11 @@ local DEFAULTS = {
     sound   = true,
     text    = true,
     flash   = true,
+    -- 中文语音的两种"口味"（/bdk bs sound1 切换）：
+    --   false（默认）= 三条判据各用一个文件（voice-cn-1/2/3），听声就能分辨是哪条在响
+    --   true         = 三条共用 voice-cn.mp3
+    -- 英文客户端只有一条语音，这个开关对它没有意义（见 L.voiceSingle）。
+    soundSingle = false,
 }
 
 ---------------------------------------------------------------- 工具
@@ -757,9 +777,18 @@ end
 -- 语音按判据分条，听声音就能分出是哪一类在响（排查误报时最省事的一招）：
 --   'bsGone'  骨盾没了     /  'ossGone' 骨盾层数不够  /  'warn' 骨盾快没了（倒计时到点）。
 -- 文件名走 L.kinds[kind].voice —— 中文三条互不相同，英文三条共用 voice-en.mp3。
+--
+-- /bdk bs sound1 可以把**中文**切成"单文件"（三条都播 voice-cn.mp3）。英文的
+-- L.voiceSingle 是 nil，所以在英文客户端这个开关自动失效（本来就只有一条）。
+-- 注意：换的只是"播哪个文件"，判据逻辑一个字都不动。
+local function VoiceFile(kind)
+    if L.voiceSingle and DB and DB.soundSingle then return L.voiceSingle end
+    return KindOf(kind).voice
+end
+
 local function PlayVoice(kind)
     if not DB or not DB.sound then return end
-    local path = ('Interface\\AddOns\\%s\\Sounds\\%s'):format(ADDON_NAME, KindOf(kind).voice)
+    local path = ('Interface\\AddOns\\%s\\Sounds\\%s'):format(ADDON_NAME, VoiceFile(kind))
     pcall(PlaySoundFile, path, 'Master')
 end
 
@@ -1292,6 +1321,11 @@ local function PrintStatus()
         L.text, DB.text and L.on or L.off,
         L.flash, DB.flash and L.on or L.off))
     print('  ' .. (IsBlood() and L.bloodYes or L.bloodNo))
+    -- 中文语音的当前口味（/bdk bs sound1）。英文客户端没这一项 —— L.voiceSingle 是 nil。
+    if L.voiceSingle then
+        print(('  %s: %s'):format(L.soundMode,
+            DB.soundSingle and L.sound1Single or L.sound1Split))
+    end
     print(('  %s: %s | %s: %s'):format(
         L.cdmBs, TrackDesc(bsFrames, bsProven),
         L.cdmOss, TrackDesc(ossFrames, ossProven)))
@@ -1333,7 +1367,8 @@ local function Test(arg)
     local idx = 1
     for i = 1, #L.kindOrder do if L.kindOrder[i] == kind then idx = i end end
     local k = KindOf(kind)
-    print(L.tag, ('voice %d/3: %s = %s'):format(idx, k.text, k.voice))
+    -- 报的是**实际会播**的那个文件（单文件模式下三条都会显示 voice-cn.mp3）
+    print(L.tag, ('voice %d/3: %s = %s'):format(idx, k.text, VoiceFile(kind)))
     print(L.tag, '  ' .. L.testHint)
     ShowText(kind)
     PlayVoice(kind)
@@ -1404,6 +1439,33 @@ CMD[#CMD + 1] = {
         end
         DB.sound = on
         print(L.tag, L.sound .. ': ' .. (on and L.on or L.off))
+    end,
+}
+
+-- /bdk bs sound1 —— 中文语音：单文件（voice-cn.mp3）/ 三条分开（voice-cn-1/2/3）。
+-- 不带参数就翻面；带 on|off 可以指定。**故意不写进 README**（用户要求）：这是口味开关，
+-- 不是对外功能点 —— 文档里只讲"三条判据各有一种说法"就够了。
+-- 英文客户端本来只有一条语音，这个开关在那里没有意义，直接回一句说明。
+CMD[#CMD + 1] = {
+    name = 'bs sound1', arg = true,
+    order = 3,
+    zh   = '切换中文语音：单文件 / 三条分开',
+    en   = 'toggle Chinese voice: single file / three separate',
+    run  = function(arg)
+        if not L.voiceSingle then
+            print(L.tag, L.sound1Na)
+            return
+        end
+        local one
+        if arg == nil then one = not DB.soundSingle
+        elseif arg == 'on' or arg == '开' then one = true
+        elseif arg == 'off' or arg == '关' then one = false
+        else
+            print(L.tag, (L.usage):format('bs sound1'))
+            return
+        end
+        DB.soundSingle = one
+        print(L.tag, L.soundMode .. ': ' .. (one and L.sound1Single or L.sound1Split))
     end,
 }
 
