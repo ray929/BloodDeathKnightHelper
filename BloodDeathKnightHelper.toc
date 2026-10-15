@@ -1,4 +1,4 @@
-## Interface: 120100
+## Interface: 120105
 ## AllowLoadGameType: mainline
 ## Title: |cffc41e3aBlood|r Death Knight Helper
 ## Title-zhCN: |cffc41e3a鲜血|r死亡骑士辅助

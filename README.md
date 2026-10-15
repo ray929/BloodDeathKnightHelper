@@ -44,7 +44,7 @@ specs are left alone — the addon simply idles.
 
 ## Requirements
 
-- Retail client (Interface 120100). No other addon required.
+- Retail client (Interface 120105). No other addon required.
 - The Bone Shield reminder needs **Bone Shield** and **Ossuary** placed in your
   Cooldown Manager.
 
@@ -116,7 +116,7 @@ World of Warcraft 正式服插件，供鲜血死亡骑士使用。
 
 ## 使用前提
 
-- 正式服（Interface 120100），不需要任何其他插件。
+- 正式服（Interface 120105），不需要任何其他插件。
 - 骨盾提醒需要在**冷却管理器**里放上「骨盾」和「埋骨之所」两个图标。
 
 ## 安装
